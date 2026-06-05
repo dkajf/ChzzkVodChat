@@ -1,4 +1,4 @@
-# ChzzkVodChat
+# ChzzkVODChat
 
 치지직(CHZZK) VOD 채팅 로그 추출기
 
@@ -11,7 +11,7 @@
 
 ## 사용법
 
-1. Releases에서 ChzzkVodChat.exe 다운로드
+1. Releases에서 ChzzkVODChat.exe 다운로드
 2. 실행
 3. VOD URL 입력
 
