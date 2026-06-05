@@ -15,15 +15,13 @@
 2. 실행
 3. VOD URL 입력
 
-예시:
-
-https://chzzk.naver.com/video/13378343
+https://chzzk.naver.com/video/********
 
 4. 완료 후 chat 폴더 확인
 
 ## 출력 형식
 
-[00:01:23][닉네임] "채팅 내용"
+[00:00:00][닉네임] "채팅 내용"
 
 ## 저장 위치
 
