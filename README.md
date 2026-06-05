@@ -11,9 +11,9 @@
 
 ## 사용법
 
-1. Releases에서 ChzzkVODChat.exe 다운로드
-2. 실행
-3. VOD URL 입력
+1. Releases에서 ChzzkVODChat.zip 다운로드
+2. 압축 해제 후 실행
+3. VOD URL 입력 (스트리머의 동영상 항목의 영상 링크)
 
 https://chzzk.naver.com/video/********
 
@@ -23,10 +23,12 @@ https://chzzk.naver.com/video/********
 
 [00:00:00][닉네임] "채팅 내용"
 
-## 저장 위치
-
-chat/
-
 ## 주의
 
 치지직 서비스 변경 시 동작하지 않을 수 있습니다.
+
+개인 작업물을 위한 습작입니다 필요하신분은 편하게 쓰세요.
+
+치지직 규정상 이슈가 있을시 바로 내리도록 하겠습니다.
+
+oshe4071@gmail.com
