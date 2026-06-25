@@ -3,6 +3,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from collections import defaultdict
 
 MAX_VODS = 10
 
@@ -21,12 +22,33 @@ def ms_to_hms(ms):
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
+def minute_to_hms(minute):
+    return ms_to_hms(minute * 60000)
+
+
 def sanitize_filename(name):
     return re.sub(r'[\\/:*?"<>|]', "_", name)
 
 
 def extract_video_no(url):
-    match = re.search(r"/video/(\d+)", url)
+    match = re.search(
+        r"/video/(\d+)",
+        url
+    )
+
+    if not match:
+        return None
+
+    return match.group(1)
+
+
+def extract_file_stem(value):
+    name = Path(value).name
+
+    match = re.match(
+        r"^(\d{4}-\d{2}-\d{2}_\d+)(?:\.(json|txt))?$",
+        name
+    )
 
     if not match:
         return None
@@ -60,51 +82,72 @@ def get_base_dir():
     return Path(__file__).parent
 
 
-def collect_urls():
+def collect_inputs():
 
     print("=" * 36)
     print("CHZZK VOD CHAT")
+    print("Version 1.2")
     print("=" * 36)
     print()
-    print("VOD URL 입력")
-    print("(URL 추가 입력 가능)")
+    print("VOD URL 또는 파일명 입력")
+    print("(추가 입력 가능)")
     print("(빈 상태에서 Enter 입력 시 등록 완료)")
     print(f"(최대 {MAX_VODS}개)")
     print()
 
-    urls = []
-    seen_videos = set()
+    mode = None
+    inputs = []
+    seen = set()
 
     while True:
 
-        url = input("> ").strip()
+        value = input("> ").strip()
 
-        if not url:
+        if not value:
             break
 
-        video_no = extract_video_no(url)
+        video_no = extract_video_no(value)
+        file_stem = extract_file_stem(value)
 
-        if not video_no:
+        if video_no:
+            value_mode = "url"
+            key = video_no
 
+        elif file_stem:
+            value_mode = "analysis"
+            key = file_stem
+
+        else:
             print()
-            print("잘못된 URL 무시:")
-            print(url)
+            print("잘못된 입력 무시:")
+            print(value)
             print()
 
             continue
 
-        if video_no in seen_videos:
+        if mode is None:
+            mode = value_mode
 
+        if value_mode != mode:
             print()
-            print(f"중복 URL 제외: {video_no}")
+            print("다른 형식 입력 무시:")
+            print(value)
             print()
 
             continue
 
-        seen_videos.add(video_no)
-        urls.append(video_no)
+        if key in seen:
+            print()
+            print("중복 입력 제외:")
+            print(key)
+            print()
 
-        if len(urls) >= MAX_VODS:
+            continue
+
+        seen.add(key)
+        inputs.append(key)
+
+        if len(inputs) >= MAX_VODS:
 
             print()
             print(
@@ -114,7 +157,42 @@ def collect_urls():
 
             break
 
-    return urls
+    return mode, inputs
+
+
+def find_analysis_files(file_stems):
+
+    base_dir = get_base_dir()
+
+    chat_dir = base_dir / "chat"
+
+    jobs = []
+
+    print()
+    print("분석 대상 조회 중...")
+    print()
+
+    for stem in file_stems:
+
+        found = None
+
+        for json_file in chat_dir.rglob("*.json"):
+
+            if json_file.stem == stem:
+
+                found = json_file
+                break
+
+        if found:
+
+            jobs.append(found)
+
+        else:
+
+            print(f"{stem} 조회 실패")
+            print()
+
+    return jobs
 
 
 def build_job_list(video_numbers):
@@ -200,6 +278,48 @@ def show_job_preview(jobs):
 
         if answer in ["n", "no"]:
             return False
+
+
+def show_analysis_preview(jobs):
+
+    print()
+    print("=" * 36)
+    print(
+        f"등록된 작업 : "
+        f"{len(jobs)} / {MAX_VODS}"
+    )
+    print("=" * 36)
+    print()
+
+    for idx, path in enumerate(jobs, start=1):
+
+        print(f"[{idx}]")
+        print()
+        print(path.stem)
+        print()
+        print("-" * 36)
+        print()
+
+    print("키워드를 입력해주세요.")
+    print()
+    print(
+        "Enter 입력 시 기본 키워드 'ㅋ'로 분석을 진행합니다."
+    )
+    print(
+        "다른 키워드를 사용하려면 1~10자의 키워드를 입력해주세요."
+    )
+    print()
+
+    keyword = input("> ").strip()
+
+    if not keyword:
+        keyword = "ㅋ"
+
+    if len(keyword) > 10:
+        keyword = keyword[:10]
+
+    return keyword
+
 
 def collect_chats(
     video_no,
@@ -306,6 +426,7 @@ def collect_chats(
 
     return all_chats
 
+
 def save_chat_files(
     all_chats,
     channel_name,
@@ -392,6 +513,421 @@ def save_chat_files(
     return txt_path, json_path
 
 
+def load_chat_json(json_path):
+
+    with open(
+        json_path,
+        "r",
+        encoding="utf-8"
+    ) as f:
+
+        return json.load(f)
+
+
+def get_analysis_duration_sec(json_path):
+
+    video_no = (
+        json_path.stem
+        .split("_")[-1]
+    )
+
+    try:
+
+        info = get_video_info(
+            video_no
+        )
+
+        return info["duration"]
+
+    except:
+
+        return None
+
+
+def analyze_chat(
+    chats,
+    keyword,
+    duration_sec=None
+):
+
+    minute_data = defaultdict(
+        lambda: {
+            "chat": 0,
+            "keyword": 0
+        }
+    )
+
+    for chat in chats:
+
+        minute = (
+            chat["playerMessageTime"]
+            // 60000
+        )
+
+        minute_data[minute]["chat"] += 1
+
+        if keyword in chat["content"]:
+
+            minute_data[minute][
+                "keyword"
+            ] += 1
+
+    results = []
+
+    total_minutes = 0
+
+    if duration_sec is not None:
+
+        total_minutes = (
+            (duration_sec + 59)
+            // 60
+        )
+
+    if minute_data:
+
+        total_minutes = max(
+            total_minutes,
+            max(minute_data.keys()) + 1
+        )
+
+    for minute in range(
+        total_minutes
+    ):
+
+        chat_count = (
+            minute_data[minute]["chat"]
+        )
+
+        keyword_count = (
+            minute_data[minute]["keyword"]
+        )
+
+        keyword_rate = 0
+
+        if chat_count:
+
+            keyword_rate = (
+                keyword_count
+                / chat_count
+            ) * 100
+
+        results.append({
+            "minute": minute,
+            "chat": chat_count,
+            "keyword": keyword_count,
+            "keyword_rate": keyword_rate
+        })
+
+    return results
+
+
+def calculate_average(results):
+
+    total_chat = sum(
+        row["chat"]
+        for row in results
+    )
+
+    overall_average = 0
+
+    broadcast_minutes = len(
+        results
+    )
+
+    if broadcast_minutes:
+
+        overall_average = (
+            total_chat
+            / broadcast_minutes
+        )
+
+    for idx, row in enumerate(results):
+
+        neighbors = []
+
+        for i in range(
+            max(0, idx - 10),
+            min(
+                len(results),
+                idx + 11
+            )
+        ):
+
+            if i == idx:
+                continue
+
+            neighbors.append(
+                results[i]["chat"]
+            )
+
+        moving_average = 0
+
+        if neighbors:
+
+            moving_average = (
+                sum(neighbors)
+                / len(neighbors)
+            )
+
+        increase = 0
+
+        if moving_average > 0:
+
+            increase = (
+                (
+                    row["chat"]
+                    - moving_average
+                )
+                / moving_average
+            ) * 100
+
+        overall_rate = 0
+
+        if overall_average > 0:
+
+            overall_rate = (
+                row["chat"]
+                / overall_average
+            ) * 100
+
+        row["moving_average"] = (
+            moving_average
+        )
+
+        row["increase"] = increase
+
+        row["overall_rate"] = (
+            overall_rate
+        )
+
+    return overall_average
+
+
+def build_top_lists(results):
+
+    chat_top = sorted(
+        results,
+        key=lambda row: (
+            -row["chat"],
+            row["minute"]
+        )
+    )[:10]
+
+    increase_top = sorted(
+        results,
+        key=lambda row: (
+            -round_number(row["increase"]),
+            row["minute"]
+        )
+    )[:10]
+
+    keyword_top = sorted(
+        results,
+        key=lambda row: (
+            -row["keyword"],
+            row["minute"]
+        )
+    )[:10]
+
+    return (
+        chat_top,
+        increase_top,
+        keyword_top
+    )
+
+
+def format_percent(value):
+    return f"{round_number(value)}%"
+
+
+def round_number(value):
+
+    if value >= 0:
+        return int(value + 0.5)
+
+    return int(value - 0.5)
+
+
+def format_increase(value):
+    rounded = round_number(value)
+    arrows = ""
+
+    if rounded > 0:
+        arrows = "▲" * (rounded // 50)
+
+    return f"{arrows}{rounded}%"
+
+
+def format_top_row(row):
+
+    return (
+        f"채팅 {row['chat']:,} | "
+        f"키워드 {row['keyword']:,} "
+        f"({row['keyword_rate']:.1f}%) | "
+        f"{format_increase(row['increase'])} | "
+        f"평균대비 {format_percent(row['overall_rate'])}"
+    )
+
+
+def format_detail_row(row):
+
+    return (
+        f"채팅 {row['chat']:,} | "
+        f"키워드 {row['keyword']:,} "
+        f"({row['keyword_rate']:.1f}%) | "
+        f"{format_increase(row['increase'])}"
+    )
+
+
+def build_analysis_text(
+    file_stem,
+    results,
+    overall_average,
+    keyword
+):
+
+    total_chat = sum(
+        row["chat"]
+        for row in results
+    )
+
+    (
+        chat_top,
+        increase_top,
+        keyword_top
+    ) = build_top_lists(
+        results
+    )
+
+    lines = []
+
+    lines.append("=" * 36)
+    lines.append("CHZZK VOD CHAT ANALYZER")
+    lines.append("=" * 36)
+    lines.append("")
+    lines.append("파일명")
+    lines.append(file_stem)
+    lines.append("")
+    lines.append("총 채팅")
+    lines.append(f"{total_chat:,}")
+    lines.append("")
+    lines.append("전체 평균 채팅")
+    lines.append(f"{round_number(overall_average):,}")
+    lines.append("")
+    lines.append("분석 키워드")
+    lines.append(keyword)
+    lines.append("")
+    lines.append("=" * 36)
+    lines.append("채팅량 TOP10")
+    lines.append("=" * 36)
+    lines.append("")
+
+    append_top_section(lines, chat_top)
+
+    lines.append("=" * 36)
+    lines.append("증가율 TOP10")
+    lines.append("=" * 36)
+    lines.append("")
+
+    append_top_section(lines, increase_top)
+
+    lines.append("=" * 36)
+    lines.append("키워드 TOP10")
+    lines.append("=" * 36)
+    lines.append("")
+
+    append_top_section(lines, keyword_top)
+
+    lines.append("=" * 36)
+    lines.append("상세로그")
+    lines.append("=" * 36)
+    lines.append("")
+
+    for row in results:
+
+        lines.append(
+            f"[{minute_to_hms(row['minute'])}]"
+        )
+        lines.append(
+            format_detail_row(row)
+        )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def append_top_section(lines, rows):
+
+    for idx, row in enumerate(rows, start=1):
+
+        lines.append(
+            f"{idx}. [{minute_to_hms(row['minute'])}]"
+        )
+        lines.append(
+            format_top_row(row)
+        )
+        lines.append("")
+
+
+def save_analysis_file(
+    json_path,
+    text
+):
+
+    output_path = (
+        json_path.parent
+        / f"{json_path.stem}_analysis.txt"
+    )
+
+    with open(
+        output_path,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        f.write(text)
+
+    return output_path
+
+
+def process_analysis_job(
+    json_path,
+    keyword
+):
+
+    chats = load_chat_json(
+        json_path
+    )
+
+    duration_sec = get_analysis_duration_sec(
+        json_path
+    )
+
+    results = analyze_chat(
+        chats,
+        keyword,
+        duration_sec
+    )
+
+    overall_average = (
+        calculate_average(
+            results
+        )
+    )
+
+    text = build_analysis_text(
+        json_path.stem,
+        results,
+        overall_average,
+        keyword
+    )
+
+    return save_analysis_file(
+        json_path,
+        text
+    )
+
+
 def process_job(
     job,
     current_index,
@@ -470,18 +1006,7 @@ def process_job(
     print()
 
 
-def main():
-
-    video_numbers = collect_urls()
-
-    if not video_numbers:
-
-        print()
-        print(
-            "등록된 URL이 없습니다."
-        )
-
-        return
+def process_url_mode(video_numbers):
 
     jobs = build_job_list(
         video_numbers
@@ -494,7 +1019,7 @@ def main():
             "조회 가능한 VOD가 없습니다."
         )
 
-        return
+        return False
 
     proceed = (
         show_job_preview(jobs)
@@ -507,7 +1032,7 @@ def main():
             "작업이 취소되었습니다."
         )
 
-        return
+        return False
 
     total_jobs = len(jobs)
 
@@ -534,6 +1059,80 @@ def main():
 
             print(e)
             print()
+
+    return True
+
+
+def process_analysis_mode(file_stems):
+
+    jobs = find_analysis_files(
+        file_stems
+    )
+
+    if not jobs:
+
+        print()
+        print(
+            "분석 가능한 파일이 없습니다."
+        )
+
+        return False
+
+    keyword = show_analysis_preview(
+        jobs
+    )
+
+    for path in jobs:
+
+        try:
+
+            output_path = process_analysis_job(
+                path,
+                keyword
+            )
+
+            print()
+            print(path.stem)
+            print("분석 완료")
+            print(output_path)
+
+        except Exception as e:
+
+            print()
+            print(f"{path.stem} 분석 실패")
+            print(e)
+            print()
+
+    return True
+
+
+def main():
+
+    mode, inputs = collect_inputs()
+
+    if not inputs:
+
+        print()
+        print(
+            "등록된 입력이 없습니다."
+        )
+
+        return
+
+    if mode == "url":
+
+        completed = process_url_mode(
+            inputs
+        )
+
+    else:
+
+        completed = process_analysis_mode(
+            inputs
+        )
+
+    if not completed:
+        return
 
     print("=" * 36)
     print("전체 작업 완료")
