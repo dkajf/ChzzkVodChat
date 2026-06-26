@@ -7,6 +7,7 @@ __pycache__/
 
 # Build
 build/
+*.spec
 
 # Generated files
 chat/

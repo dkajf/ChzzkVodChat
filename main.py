@@ -6,6 +6,9 @@ from pathlib import Path
 from collections import defaultdict
 
 MAX_VODS = 10
+MIN_CHAT_COUNT = 10
+MOVING_AVERAGE_MINUTES = 15
+PREVIEW_TITLE_WIDTH = 18
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0",
@@ -86,7 +89,7 @@ def collect_inputs():
 
     print("=" * 36)
     print("CHZZK VOD CHAT")
-    print("Version 1.2")
+    print("Version 1.2.1")
     print("=" * 36)
     print()
     print("VOD URL 또는 파일명 입력")
@@ -101,7 +104,13 @@ def collect_inputs():
 
     while True:
 
-        value = input("> ").strip()
+        try:
+
+            value = input("> ").strip()
+
+        except EOFError:
+
+            break
 
         if not value:
             break
@@ -230,20 +239,15 @@ def show_job_preview(jobs):
 
     print()
     print("=" * 36)
-    print(
-        f"등록된 작업 : "
-        f"{len(jobs)} / {MAX_VODS}"
-    )
+    print("CHZZK VOD CHAT COLLECTOR")
     print("=" * 36)
+    print()
+    print("[수집 대상]")
     print()
 
     for idx, job in enumerate(jobs, start=1):
 
         info = job["info"]
-
-        channel_name = (
-            info["channel"]["channelName"]
-        )
 
         publish_date = (
             info["publishDate"][:10]
@@ -253,25 +257,27 @@ def show_job_preview(jobs):
             info["videoTitle"]
         )
 
-        print(f"[{idx}]")
-        print()
-        print(f"채널명 : {channel_name}")
-        print(f"방송일 : {publish_date}")
-        print(
-            f"영상번호 : {job['video_no']}"
+        title = shorten_text(
+            title,
+            PREVIEW_TITLE_WIDTH
         )
-        print()
-        print("제목 :")
-        print(title)
-        print()
-        print("-" * 36)
-        print()
+
+        print(
+            f"{idx:02d}. {publish_date} | "
+            f"{title:<{PREVIEW_TITLE_WIDTH}} | "
+            f"{job['video_no']}"
+        )
+
+    print()
+    print(f"총 대상 : {len(jobs)}개")
+    print()
+    print("=" * 36)
+    print("채팅 수집을 시작하시겠습니까? (Y/N)")
+    print("=" * 36)
 
     while True:
 
-        answer = input(
-            "진행하시겠습니까? (Y/N) : "
-        ).strip().lower()
+        answer = input("> ").strip().lower()
 
         if answer in ["y", "yes"]:
             return True
@@ -280,26 +286,34 @@ def show_job_preview(jobs):
             return False
 
 
+def shorten_text(text, width):
+
+    if len(text) <= width:
+        return text
+
+    if width <= 3:
+        return text[:width]
+
+    return text[:width - 3] + "..."
+
+
 def show_analysis_preview(jobs):
 
     print()
     print("=" * 36)
-    print(
-        f"등록된 작업 : "
-        f"{len(jobs)} / {MAX_VODS}"
-    )
+    print("CHZZK VOD CHAT ANALYZER")
     print("=" * 36)
+    print()
+    print("[분석 대상]")
     print()
 
     for idx, path in enumerate(jobs, start=1):
 
-        print(f"[{idx}]")
-        print()
-        print(path.stem)
-        print()
-        print("-" * 36)
-        print()
+        print(f"{idx:02d}. {path.stem}")
 
+    print()
+    print(f"총 파일 : {len(jobs)}개")
+    print()
     print("키워드를 입력해주세요.")
     print()
     print(
@@ -318,7 +332,44 @@ def show_analysis_preview(jobs):
     if len(keyword) > 10:
         keyword = keyword[:10]
 
-    return keyword
+    print()
+    print(f"키워드 : {keyword}")
+    print()
+    print("=" * 36)
+    print("채팅 분석을 시작하시겠습니까? (Y/N)")
+    print("=" * 36)
+
+    while True:
+
+        answer = input("> ").strip().lower()
+
+        if answer in ["y", "yes"]:
+            return keyword
+
+        if answer in ["n", "no"]:
+            return None
+
+
+def show_analysis_complete_menu():
+
+    print()
+    print("=" * 36)
+    print("분석이 완료되었습니다.")
+    print("=" * 36)
+    print()
+    print("1. 처음으로 돌아가기")
+    print("2. 종료")
+    print()
+
+    while True:
+
+        answer = input("선택 : ").strip()
+
+        if answer == "1":
+            return True
+
+        if answer == "2":
+            return False
 
 
 def collect_chats(
@@ -646,15 +697,9 @@ def calculate_average(results):
         neighbors = []
 
         for i in range(
-            max(0, idx - 10),
-            min(
-                len(results),
-                idx + 11
-            )
+            max(0, idx - MOVING_AVERAGE_MINUTES),
+            idx
         ):
-
-            if i == idx:
-                continue
 
             neighbors.append(
                 results[i]["chat"]
@@ -705,6 +750,12 @@ def calculate_average(results):
 
 def build_top_lists(results):
 
+    ranked_results = [
+        row
+        for row in results
+        if row["chat"] >= MIN_CHAT_COUNT
+    ]
+
     chat_top = sorted(
         results,
         key=lambda row: (
@@ -714,16 +765,25 @@ def build_top_lists(results):
     )[:10]
 
     increase_top = sorted(
-        results,
+        ranked_results,
         key=lambda row: (
             -round_number(row["increase"]),
             row["minute"]
         )
     )[:10]
 
-    keyword_top = sorted(
-        results,
+    keyword_count_top = sorted(
+        ranked_results,
         key=lambda row: (
+            -row["keyword"],
+            row["minute"]
+        )
+    )[:10]
+
+    keyword_rate_top = sorted(
+        ranked_results,
+        key=lambda row: (
+            -row["keyword_rate"],
             -row["keyword"],
             row["minute"]
         )
@@ -732,7 +792,8 @@ def build_top_lists(results):
     return (
         chat_top,
         increase_top,
-        keyword_top
+        keyword_count_top,
+        keyword_rate_top
     )
 
 
@@ -750,32 +811,57 @@ def round_number(value):
 
 def format_increase(value):
     rounded = round_number(value)
-    arrows = ""
 
-    if rounded > 0:
-        arrows = "▲" * (rounded // 50)
+    return f"{rounded:+d}% {get_increase_marker(value):<3}"
 
-    return f"{arrows}{rounded}%"
+
+def get_keyword_rate_marker(value):
+
+    if value >= 30:
+        return "▲▲▲"
+
+    if value >= 20:
+        return "▲▲"
+
+    if value >= 10:
+        return "▲"
+
+    return "-"
+
+
+def get_increase_marker(value):
+
+    if value >= 100:
+        return "▲▲▲"
+
+    if value >= 60:
+        return "▲▲"
+
+    if value >= 30:
+        return "▲"
+
+    return "-"
 
 
 def format_top_row(row):
 
     return (
-        f"채팅 {row['chat']:,} | "
-        f"키워드 {row['keyword']:,} "
-        f"({row['keyword_rate']:.1f}%) | "
-        f"{format_increase(row['increase'])} | "
-        f"평균대비 {format_percent(row['overall_rate'])}"
+        f"채팅 {row['chat']:>4,} | "
+        f"키워드 {row['keyword']:>3,} "
+        f"({row['keyword_rate']:>5.1f}%) "
+        f"{get_keyword_rate_marker(row['keyword_rate']):<3} | "
+        f"평균 {format_increase(row['increase']):>8}"
     )
 
 
 def format_detail_row(row):
 
     return (
-        f"채팅 {row['chat']:,} | "
-        f"키워드 {row['keyword']:,} "
-        f"({row['keyword_rate']:.1f}%) | "
-        f"{format_increase(row['increase'])}"
+        f"채팅 {row['chat']:>4,} | "
+        f"키워드 {row['keyword']:>3,} "
+        f"({row['keyword_rate']:>5.1f}%) "
+        f"{get_keyword_rate_marker(row['keyword_rate']):<3} | "
+        f"평균 {format_increase(row['increase']):>8}"
     )
 
 
@@ -794,7 +880,8 @@ def build_analysis_text(
     (
         chat_top,
         increase_top,
-        keyword_top
+        keyword_count_top,
+        keyword_rate_top
     ) = build_top_lists(
         results
     )
@@ -814,6 +901,12 @@ def build_analysis_text(
     lines.append("전체 평균 채팅")
     lines.append(f"{round_number(overall_average):,}")
     lines.append("")
+    lines.append("이동평균 기준")
+    lines.append(f"최근 {MOVING_AVERAGE_MINUTES}분")
+    lines.append("")
+    lines.append("랭킹 최소 채팅")
+    lines.append(f"{MIN_CHAT_COUNT:,}")
+    lines.append("")
     lines.append("분석 키워드")
     lines.append(keyword)
     lines.append("")
@@ -825,18 +918,25 @@ def build_analysis_text(
     append_top_section(lines, chat_top)
 
     lines.append("=" * 36)
-    lines.append("증가율 TOP10")
+    lines.append("이동평균 증가율 TOP10")
     lines.append("=" * 36)
     lines.append("")
 
     append_top_section(lines, increase_top)
 
     lines.append("=" * 36)
-    lines.append("키워드 TOP10")
+    lines.append("키워드 개수 TOP10")
     lines.append("=" * 36)
     lines.append("")
 
-    append_top_section(lines, keyword_top)
+    append_top_section(lines, keyword_count_top)
+
+    lines.append("=" * 36)
+    lines.append("키워드 비율 TOP10")
+    lines.append("=" * 36)
+    lines.append("")
+
+    append_top_section(lines, keyword_rate_top)
 
     lines.append("=" * 36)
     lines.append("상세로그")
@@ -1082,6 +1182,15 @@ def process_analysis_mode(file_stems):
         jobs
     )
 
+    if keyword is None:
+
+        print()
+        print(
+            "작업이 취소되었습니다."
+        )
+
+        return False
+
     for path in jobs:
 
         try:
@@ -1108,35 +1217,47 @@ def process_analysis_mode(file_stems):
 
 def main():
 
-    mode, inputs = collect_inputs()
+    while True:
 
-    if not inputs:
+        mode, inputs = collect_inputs()
+
+        if not inputs:
+
+            print()
+            print(
+                "등록된 입력이 없습니다."
+            )
+
+            return
+
+        if mode == "url":
+
+            completed = process_url_mode(
+                inputs
+            )
+
+        else:
+
+            completed = process_analysis_mode(
+                inputs
+            )
+
+        if not completed:
+            return
+
+        if mode != "analysis":
+
+            print("=" * 36)
+            print("전체 작업 완료")
+            print("=" * 36)
+            return
+
+        restart = show_analysis_complete_menu()
+
+        if not restart:
+            return
 
         print()
-        print(
-            "등록된 입력이 없습니다."
-        )
-
-        return
-
-    if mode == "url":
-
-        completed = process_url_mode(
-            inputs
-        )
-
-    else:
-
-        completed = process_analysis_mode(
-            inputs
-        )
-
-    if not completed:
-        return
-
-    print("=" * 36)
-    print("전체 작업 완료")
-    print("=" * 36)
 
 
 if __name__ == "__main__":
