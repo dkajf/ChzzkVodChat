@@ -29,6 +29,10 @@ def minute_to_hms(minute):
     return ms_to_hms(minute * 60000)
 
 
+def minute_to_hms_offset(minute, offset_sec):
+    return format_time_seconds(offset_sec + minute * 60)
+
+
 def sanitize_filename(name):
     return re.sub(r'[\\/:*?"<>|]', "_", name)
 
@@ -57,6 +61,53 @@ def extract_file_stem(value):
         return None
 
     return match.group(1)
+
+
+def parse_hms(value):
+    if not re.match(r"^\d{2}:\d{2}:\d{2}$", value):
+        return None
+
+    parts = value.split(":")
+
+    try:
+        hours, minutes, seconds = map(int, parts)
+
+    except ValueError:
+        return None
+
+    if hours < 0 or minutes < 0 or seconds < 0:
+        return None
+
+    if minutes >= 60 or seconds >= 60:
+        return None
+
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def format_time_seconds(seconds):
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def format_approx_minutes(seconds):
+    minutes = round(seconds / 60)
+
+    if minutes < 1:
+        minutes = 1
+
+    return f"약 {minutes}분"
+
+
+def get_chat_duration_sec(chats):
+    if not chats:
+        return 0
+
+    return max(
+        chat["playerMessageTime"] for chat in chats
+    ) // 1000
 
 
 def get_video_info(video_no):
@@ -89,13 +140,15 @@ def collect_inputs():
 
     print("=" * 36)
     print("CHZZK VOD CHAT")
-    print("Version 1.2.1")
+    print("Version 1.2.2")
     print("=" * 36)
     print()
-    print("VOD URL 또는 파일명 입력")
-    print("(추가 입력 가능)")
+    print("VOD URL 또는 분석할 파일명 입력")
+    print("URL 입력 시 채팅 수집 모드")
+    print("파일명 입력 시 단일 파일 분석 모드")
+    print("(분석 모드는 1개 파일만 입력 가능합니다)")
     print("(빈 상태에서 Enter 입력 시 등록 완료)")
-    print(f"(최대 {MAX_VODS}개)")
+    print(f"(최대 {MAX_VODS}개 URL)")
     print()
 
     mode = None
@@ -155,6 +208,9 @@ def collect_inputs():
 
         seen.add(key)
         inputs.append(key)
+
+        if value_mode == "analysis":
+            break
 
         if len(inputs) >= MAX_VODS:
 
@@ -297,79 +353,139 @@ def shorten_text(text, width):
     return text[:width - 3] + "..."
 
 
-def show_analysis_preview(jobs):
+def show_analysis_preview(json_path, duration_sec):
 
     print()
     print("=" * 36)
     print("CHZZK VOD CHAT ANALYZER")
     print("=" * 36)
     print()
-    print("[분석 대상]")
-    print()
-
-    for idx, path in enumerate(jobs, start=1):
-
-        print(f"{idx:02d}. {path.stem}")
-
-    print()
-    print(f"총 파일 : {len(jobs)}개")
-    print()
-    print("키워드를 입력해주세요.")
-    print()
-    print(
-        "Enter 입력 시 기본 키워드 'ㅋ'로 분석을 진행합니다."
-    )
-    print(
-        "다른 키워드를 사용하려면 1~10자의 키워드를 입력해주세요."
-    )
-    print()
-
-    keyword = input("> ").strip()
-
-    if not keyword:
-        keyword = "ㅋ"
-
-    if len(keyword) > 10:
-        keyword = keyword[:10]
-
-    print()
-    print(f"키워드 : {keyword}")
-    print()
-    print("=" * 36)
-    print("채팅 분석을 시작하시겠습니까? (Y/N)")
-    print("=" * 36)
 
     while True:
 
-        answer = input("> ").strip().lower()
+        print("분석 시작 시간 입력")
+        print("예시 : 00:00:00")
+        print("(미입력 시 00:00:00)")
+        start_value = input("> ").strip()
 
-        if answer in ["y", "yes"]:
-            return keyword
+        if not start_value:
+            start_sec = 0
+        else:
+            start_sec = parse_hms(start_value)
 
-        if answer in ["n", "no"]:
-            return None
+            if start_sec is None:
+                print()
+                print("잘못된 시간 형식입니다. HH:MM:SS 형식으로 입력해주세요.")
+                print()
+                continue
 
+            if start_sec < 0:
+                print()
+                print("음수 시간은 입력할 수 없습니다.")
+                print()
+                continue
 
-def show_analysis_complete_menu():
+            if duration_sec is not None and start_sec > duration_sec:
+                print()
+                print("영상 길이를 초과하는 시간입니다.")
+                print()
+                continue
 
-    print()
-    print("=" * 36)
-    print("분석이 완료되었습니다.")
-    print("=" * 36)
-    print()
-    print("1. 처음으로 돌아가기")
-    print("2. 종료")
-    print()
+        while True:
 
-    while True:
+            print()
+            print("분석 종료 시간 입력")
+            print("예시 : 00:00:00")
+            print(
+                f"(미입력 시 {format_time_seconds(duration_sec)})"
+            )
+            end_value = input("> ").strip()
 
-        answer = input("선택 : ").strip()
+            if not end_value:
+                end_sec = duration_sec
+            else:
+                end_sec = parse_hms(end_value)
 
-        if answer == "1":
-            return True
+                if end_sec is None:
+                    print()
+                    print("잘못된 시간 형식입니다. HH:MM:SS 형식으로 입력해주세요.")
+                    print()
+                    continue
 
-        if answer == "2":
-            return False
+                if end_sec < 0:
+                    print()
+                    print("음수 시간은 입력할 수 없습니다.")
+                    print()
+                    continue
+
+                if duration_sec is not None and end_sec > duration_sec:
+                    print()
+                    print("영상 길이를 초과하는 시간입니다.")
+                    print()
+                    continue
+
+            if start_sec > end_sec:
+                print()
+                print("시작 시간이 종료 시간보다 늦습니다. 다시 입력해주세요.")
+                print()
+                break
+
+            break
+
+        if start_sec > end_sec:
+            continue
+
+        print()
+        print("키워드를 입력해주세요.")
+        print()
+        print(
+            "Enter 입력 시 기본 키워드 'ㅋ'로 분석을 진행합니다."
+        )
+        print(
+            "다른 키워드를 사용하려면 1~10자의 키워드를 입력해주세요."
+        )
+        print()
+
+        keyword = input("> ").strip()
+
+        if not keyword:
+            keyword = "ㅋ"
+
+        if len(keyword) > 10:
+            keyword = keyword[:10]
+
+        print()
+        print("=========================================")
+        print("파일명")
+        print(json_path.stem)
+        print()
+        print("분석 구간")
+        print(
+            f"{format_time_seconds(start_sec)} ~ {format_time_seconds(end_sec)}"
+        )
+        print()
+        print("키워드")
+        print(keyword)
+        print()
+        print("예상 분석 대상")
+        print(
+            format_approx_minutes(end_sec - start_sec)
+        )
+        print("=========================================")
+        print("계속 진행하시겠습니까? (Y/N)")
+        print("=" * 36)
+
+        while True:
+
+            answer = input("> ").strip().lower()
+
+            if answer in ["y", "yes"]:
+                return keyword, start_sec, end_sec
+
+            if answer in ["n", "no"]:
+                print()
+                print("메인 메뉴로 돌아갑니다.")
+                return None
 
 
 def collect_chats(
@@ -598,7 +714,8 @@ def get_analysis_duration_sec(json_path):
 def analyze_chat(
     chats,
     keyword,
-    duration_sec=None
+    start_sec=0,
+    end_sec=None
 ):
 
     minute_data = defaultdict(
@@ -608,10 +725,24 @@ def analyze_chat(
         }
     )
 
+    if end_sec is None:
+        end_sec = get_chat_duration_sec(chats)
+
+    start_ms = start_sec * 1000
+    end_ms = end_sec * 1000
+
     for chat in chats:
 
+        chat_time = chat["playerMessageTime"]
+
+        if chat_time < start_ms:
+            continue
+
+        if chat_time >= end_ms:
+            continue
+
         minute = (
-            chat["playerMessageTime"]
+            (chat_time - start_ms)
             // 60000
         )
 
@@ -627,15 +758,13 @@ def analyze_chat(
 
     total_minutes = 0
 
-    if duration_sec is not None:
-
+    if end_sec is not None:
         total_minutes = (
-            (duration_sec + 59)
+            (end_sec - start_sec + 59)
             // 60
         )
 
     if minute_data:
-
         total_minutes = max(
             total_minutes,
             max(minute_data.keys()) + 1
@@ -869,7 +998,9 @@ def build_analysis_text(
     file_stem,
     results,
     overall_average,
-    keyword
+    keyword,
+    start_sec,
+    end_sec
 ):
 
     total_chat = sum(
@@ -910,33 +1041,38 @@ def build_analysis_text(
     lines.append("분석 키워드")
     lines.append(keyword)
     lines.append("")
+    lines.append("분석 구간")
+    lines.append(
+        f"{format_time_seconds(start_sec)} ~ {format_time_seconds(end_sec)}"
+    )
+    lines.append("")
     lines.append("=" * 36)
     lines.append("채팅량 TOP10")
     lines.append("=" * 36)
     lines.append("")
 
-    append_top_section(lines, chat_top)
+    append_top_section(lines, chat_top, start_sec)
 
     lines.append("=" * 36)
     lines.append("이동평균 증가율 TOP10")
     lines.append("=" * 36)
     lines.append("")
 
-    append_top_section(lines, increase_top)
+    append_top_section(lines, increase_top, start_sec)
 
     lines.append("=" * 36)
     lines.append("키워드 개수 TOP10")
     lines.append("=" * 36)
     lines.append("")
 
-    append_top_section(lines, keyword_count_top)
+    append_top_section(lines, keyword_count_top, start_sec)
 
     lines.append("=" * 36)
     lines.append("키워드 비율 TOP10")
     lines.append("=" * 36)
     lines.append("")
 
-    append_top_section(lines, keyword_rate_top)
+    append_top_section(lines, keyword_rate_top, start_sec)
 
     lines.append("=" * 36)
     lines.append("상세로그")
@@ -946,7 +1082,7 @@ def build_analysis_text(
     for row in results:
 
         lines.append(
-            f"[{minute_to_hms(row['minute'])}]"
+            f"[{minute_to_hms_offset(row['minute'], start_sec)}]"
         )
         lines.append(
             format_detail_row(row)
@@ -956,12 +1092,12 @@ def build_analysis_text(
     return "\n".join(lines)
 
 
-def append_top_section(lines, rows):
+def append_top_section(lines, rows, start_sec=0):
 
     for idx, row in enumerate(rows, start=1):
 
         lines.append(
-            f"{idx}. [{minute_to_hms(row['minute'])}]"
+            f"{idx}. [{minute_to_hms_offset(row['minute'], start_sec)}]"
         )
         lines.append(
             format_top_row(row)
@@ -992,21 +1128,17 @@ def save_analysis_file(
 
 def process_analysis_job(
     json_path,
-    keyword
+    chats,
+    keyword,
+    start_sec,
+    end_sec
 ):
-
-    chats = load_chat_json(
-        json_path
-    )
-
-    duration_sec = get_analysis_duration_sec(
-        json_path
-    )
 
     results = analyze_chat(
         chats,
         keyword,
-        duration_sec
+        start_sec,
+        end_sec
     )
 
     overall_average = (
@@ -1019,7 +1151,9 @@ def process_analysis_job(
         json_path.stem,
         results,
         overall_average,
-        keyword
+        keyword,
+        start_sec,
+        end_sec
     )
 
     return save_analysis_file(
@@ -1119,7 +1253,7 @@ def process_url_mode(video_numbers):
             "조회 가능한 VOD가 없습니다."
         )
 
-        return False
+        return True
 
     proceed = (
         show_job_preview(jobs)
@@ -1129,10 +1263,10 @@ def process_url_mode(video_numbers):
 
         print()
         print(
-            "작업이 취소되었습니다."
+            "메인 메뉴로 돌아갑니다."
         )
 
-        return False
+        return True
 
     total_jobs = len(jobs)
 
@@ -1176,41 +1310,51 @@ def process_analysis_mode(file_stems):
             "분석 가능한 파일이 없습니다."
         )
 
-        return False
+        return True
 
-    keyword = show_analysis_preview(
-        jobs
+    json_path = jobs[0]
+    chats = load_chat_json(json_path)
+
+    duration_sec = get_analysis_duration_sec(
+        json_path
     )
 
-    if keyword is None:
-
-        print()
-        print(
-            "작업이 취소되었습니다."
+    if duration_sec is None:
+        duration_sec = get_chat_duration_sec(
+            chats
         )
 
-        return False
+    preview = show_analysis_preview(
+        json_path,
+        duration_sec
+    )
 
-    for path in jobs:
+    if preview is None:
+        return True
 
-        try:
+    keyword, start_sec, end_sec = preview
 
-            output_path = process_analysis_job(
-                path,
-                keyword
-            )
+    try:
 
-            print()
-            print(path.stem)
-            print("분석 완료")
-            print(output_path)
+        output_path = process_analysis_job(
+            json_path,
+            chats,
+            keyword,
+            start_sec,
+            end_sec
+        )
 
-        except Exception as e:
+        print()
+        print(json_path.stem)
+        print("분석 완료")
+        print(output_path)
 
-            print()
-            print(f"{path.stem} 분석 실패")
-            print(e)
-            print()
+    except Exception as e:
+
+        print()
+        print(f"{json_path.stem} 분석 실패")
+        print(e)
+        print()
 
     return True
 
@@ -1245,18 +1389,8 @@ def main():
         if not completed:
             return
 
-        if mode != "analysis":
-
-            print("=" * 36)
-            print("전체 작업 완료")
-            print("=" * 36)
-            return
-
-        restart = show_analysis_complete_menu()
-
-        if not restart:
-            return
-
+        print()
+        print("메인 메뉴로 돌아갑니다.")
         print()
 
 
