@@ -14,10 +14,69 @@ except ImportError:
 class EscapeInput(Exception):
     pass
 
-MAX_VODS = 10
-MIN_CHAT_COUNT = 10
-MOVING_AVERAGE_MINUTES = 15
-PREVIEW_TITLE_WIDTH = 18
+CONFIG_FORMAT = "1"
+SETTINGS_FILE_NAME = "CHZZK_VOD_CHAT_Settings.txt"
+
+DEFAULT_SETTINGS = {
+    "ConfigFormat": CONFIG_FORMAT,
+    "MaxVods": 30,
+    "OutputFolder": "chat",
+    "DefaultKeyword": "ㅋ",
+    "MaxKeywordRepeat": 5,
+    "TopMinimumChatCount": 0,
+    "MovingAverageMinutes": 15,
+    "TopCount": 10,
+    "PreviewTitleWidth": 18,
+    "SaveDetailLog": True
+}
+
+SETTINGS = DEFAULT_SETTINGS.copy()
+
+SETTING_RULES = {
+    "MaxVods": {
+        "type": "int",
+        "min": 1,
+        "max": 30
+    },
+    "OutputFolder": {
+        "type": "string",
+        "min_length": 1,
+        "max_length": 100
+    },
+    "DefaultKeyword": {
+        "type": "string",
+        "min_length": 1,
+        "max_length": 10
+    },
+    "MaxKeywordRepeat": {
+        "type": "int",
+        "min": 0,
+        "max": 100
+    },
+    "TopMinimumChatCount": {
+        "type": "int",
+        "min": 0,
+        "max": 1000000
+    },
+    "MovingAverageMinutes": {
+        "type": "int",
+        "min": 1,
+        "max": 60
+    },
+    "TopCount": {
+        "type": "int",
+        "min": 1,
+        "max": 100
+    },
+    "PreviewTitleWidth": {
+        "type": "int",
+        "min": 5,
+        "max": 100
+    },
+    "SaveDetailLog": {
+        "type": "bool"
+    }
+}
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0",
@@ -180,19 +239,383 @@ def get_base_dir():
     return Path(__file__).parent
 
 
+def get_settings_path():
+
+    return get_base_dir() / SETTINGS_FILE_NAME
+
+
+def get_setting(name):
+
+    return SETTINGS[name]
+
+
+def build_settings_text(settings):
+
+    bool_value = "True"
+
+    if not settings["SaveDetailLog"]:
+        bool_value = "False"
+
+    return "\n".join([
+        "# ==========================================",
+        "# CHZZK VOD CHAT Settings",
+        "# ==========================================",
+        "",
+        f"ConfigFormat={settings['ConfigFormat']}",
+        "",
+        "[Collect]",
+        "",
+        "; 한 번에 등록할 수 있는 최대 VOD 개수입니다.",
+        "; 권장 범위 : 1 ~ 30",
+        f"MaxVods={settings['MaxVods']}",
+        "",
+        "; 채팅 파일(.json/.txt)이 저장될 폴더입니다.",
+        "; 프로그램 실행 폴더를 기준으로 생성됩니다.",
+        f"OutputFolder={settings['OutputFolder']}",
+        "",
+        "",
+        "[Analyze]",
+        "",
+        "; 분석 실행 시 기본으로 사용할 키워드입니다.",
+        "; 입력 없이 Enter를 누르면 이 키워드가 사용됩니다.",
+        f"DefaultKeyword={settings['DefaultKeyword']}",
+        "",
+        "; 하나의 채팅에서 동일 키워드를 최대 몇 번까지 카운트할지 설정합니다.",
+        "; 0으로 설정하면 제한 없이 모두 카운트합니다.",
+        f"MaxKeywordRepeat={settings['MaxKeywordRepeat']}",
+        "",
+        "; TOP 구간에 포함하기 위한 최소 채팅 수를 설정합니다.",
+        "; 0으로 설정하면 방송 전체 평균 채팅 수를 자동으로 사용합니다.",
+        f"TopMinimumChatCount={settings['TopMinimumChatCount']}",
+        "",
+        "; 이동 평균 계산에 사용할 이전 구간(분)입니다.",
+        "; 값이 클수록 평균이 부드럽게 계산됩니다.",
+        f"MovingAverageMinutes={settings['MovingAverageMinutes']}",
+        "",
+        "",
+        "[Display]",
+        "",
+        "; 각 TOP 목록에 출력할 최대 개수입니다.",
+        f"TopCount={settings['TopCount']}",
+        "",
+        "; 미리보기에서 표시할 방송 제목의 최대 글자 수입니다.",
+        "; 길어질 경우 자동으로 ... 처리합니다.",
+        f"PreviewTitleWidth={settings['PreviewTitleWidth']}",
+        "",
+        "; 분석 결과 파일에 상세 로그를 포함할지 설정합니다.",
+        "; False로 설정하면 TOP 결과만 저장합니다.",
+        f"SaveDetailLog={bool_value}",
+        ""
+    ])
+
+
+def save_settings(settings):
+
+    settings_path = get_settings_path()
+
+    with open(
+        settings_path,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        f.write(build_settings_text(settings))
+
+
+def print_settings_notice(message):
+
+    print()
+    print(message)
+    print(f"설정 파일: {SETTINGS_FILE_NAME}")
+    print("필요하면 메모장으로 수정할 수 있습니다.")
+    print()
+
+
+def create_settings_if_not_exists():
+
+    settings_path = get_settings_path()
+
+    if settings_path.exists():
+        return False
+
+    save_settings(DEFAULT_SETTINGS)
+
+    print_settings_notice("설정 파일이 생성되었습니다.")
+
+    return True
+
+
+def load_settings():
+
+    settings_path = get_settings_path()
+    loaded = {}
+
+    try:
+
+        with open(
+            settings_path,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            for line in f:
+
+                value = line.strip()
+
+                if not value:
+                    continue
+
+                if value.startswith("#") or value.startswith(";"):
+                    continue
+
+                if value.startswith("[") and value.endswith("]"):
+                    continue
+
+                if "=" not in value:
+                    continue
+
+                key, raw_value = value.split("=", 1)
+                loaded[key.strip()] = raw_value.strip()
+
+    except Exception as e:
+
+        loaded["_LoadError"] = str(e)
+
+    return loaded
+
+
+def validate_config_format(raw_settings):
+
+    return raw_settings.get("ConfigFormat") == CONFIG_FORMAT
+
+
+def format_setting_error(key, value, reason, default_value):
+
+    return (
+        f"{key} = {value}\n"
+        f"-> {reason}\n"
+        f"-> 기본값({default_value})으로 변경되었습니다."
+    )
+
+
+def parse_int_setting(key, value, rule, errors):
+
+    default_value = DEFAULT_SETTINGS[key]
+
+    try:
+        number = int(value)
+
+    except (TypeError, ValueError):
+        errors.append(
+            format_setting_error(
+                key,
+                value,
+                "정수만 입력 가능합니다.",
+                default_value
+            )
+        )
+        return default_value
+
+    if number < rule["min"] or number > rule["max"]:
+        errors.append(
+            format_setting_error(
+                key,
+                value,
+                f"허용 범위({rule['min']}~{rule['max']})를 벗어났습니다.",
+                default_value
+            )
+        )
+        return default_value
+
+    return number
+
+
+def parse_bool_setting(key, value, errors):
+
+    default_value = DEFAULT_SETTINGS[key]
+
+    if isinstance(value, bool):
+        return value
+
+    normalized = str(value).strip().lower()
+
+    if normalized == "true":
+        return True
+
+    if normalized == "false":
+        return False
+
+    errors.append(
+        format_setting_error(
+            key,
+            value,
+            "True 또는 False만 입력 가능합니다.",
+            default_value
+        )
+    )
+
+    return default_value
+
+
+def parse_string_setting(key, value, rule, errors):
+
+    default_value = DEFAULT_SETTINGS[key]
+
+    if value is None:
+        value = ""
+
+    text = str(value).strip()
+
+    if len(text) < rule["min_length"]:
+        errors.append(
+            format_setting_error(
+                key,
+                value,
+                "빈 값은 사용할 수 없습니다.",
+                default_value
+            )
+        )
+        return default_value
+
+    if len(text) > rule["max_length"]:
+        errors.append(
+            format_setting_error(
+                key,
+                value,
+                f"허용 길이({rule['max_length']}자)를 벗어났습니다.",
+                default_value
+            )
+        )
+        return default_value
+
+    if key == "OutputFolder":
+
+        output_path = Path(text)
+
+        if output_path.is_absolute() or ".." in output_path.parts:
+            errors.append(
+                format_setting_error(
+                    key,
+                    value,
+                    "프로그램 실행 폴더 안의 상대 경로만 사용할 수 있습니다.",
+                    default_value
+                )
+            )
+            return default_value
+
+    return text
+
+
+def validate_setting_value(key, value, errors):
+
+    rule = SETTING_RULES[key]
+
+    if rule["type"] == "int":
+        return parse_int_setting(
+            key,
+            value,
+            rule,
+            errors
+        )
+
+    if rule["type"] == "bool":
+        return parse_bool_setting(
+            key,
+            value,
+            errors
+        )
+
+    return parse_string_setting(
+        key,
+        value,
+        rule,
+        errors
+    )
+
+
+def validate_settings(raw_settings):
+
+    if "_LoadError" in raw_settings:
+        print_settings_notice(
+            "설정 파일을 읽을 수 없어 최신 형식으로 재생성했습니다."
+        )
+        print(raw_settings["_LoadError"])
+
+        restored = DEFAULT_SETTINGS.copy()
+        save_settings(restored)
+        return restored
+
+    if not validate_config_format(raw_settings):
+        print_settings_notice(
+            "설정 파일 형식이 현재 버전과 달라 최신 형식으로 초기화했습니다."
+        )
+
+        restored = DEFAULT_SETTINGS.copy()
+        save_settings(restored)
+        return restored
+
+    settings = DEFAULT_SETTINGS.copy()
+    errors = []
+
+    for key in SETTING_RULES:
+
+        value = raw_settings.get(key)
+
+        if value is None:
+            errors.append(
+                format_setting_error(
+                    key,
+                    "(없음)",
+                    "설정값이 존재하지 않습니다.",
+                    DEFAULT_SETTINGS[key]
+                )
+            )
+            continue
+
+        settings[key] = validate_setting_value(
+            key,
+            value,
+            errors
+        )
+
+    if errors:
+        print()
+        print("다음 설정값이 올바르지 않아 기본값으로 복원했습니다.")
+        print()
+
+        for error in errors:
+            print(error)
+            print()
+
+    save_settings(settings)
+
+    return settings
+
+
+def initialize_settings():
+
+    create_settings_if_not_exists()
+
+    raw_settings = load_settings()
+
+    return validate_settings(raw_settings)
+
+
 def collect_inputs():
+
+    max_vods = get_setting("MaxVods")
 
     print("=" * 36)
     print("CHZZK VOD CHAT")
-    print("Version 1.2.3")
+    print("Version 1.2.4")
     print("=" * 36)
     print()
-    print("VOD URL 또는 분석할 파일명 입력")
-    print("URL 입력 시 채팅 수집 모드")
-    print("파일명 입력 시 단일 파일 분석 모드")
-    print("(분석 모드는 1개 파일만 입력 가능합니다)")
-    print("(빈 상태에서 Enter 입력 시 등록 완료)")
-    print(f"(최대 {MAX_VODS}개 URL)")
+    print("VOD URL 또는 분석 파일명을 입력하세요.")
+    print("- URL: 채팅 수집")
+    print("- 파일명: 분석(json/txt 이름 가능)")
+    print("  실제 분석은 같은 이름의 json 파일을 사용합니다.")
+    print("- 빈 Enter: 시작")
+    print(f"최대 {max_vods}개 URL")
     print()
 
     mode = None
@@ -225,7 +648,9 @@ def collect_inputs():
 
         else:
             print()
-            print("잘못된 입력 무시:")
+            print("입력 형식을 확인해주세요.")
+            print("VOD URL 또는 chat 폴더의 json/txt 파일명을 입력할 수 있습니다.")
+            print("txt 입력 시 같은 이름의 json 파일을 찾아 분석합니다.")
             print(value)
             print()
 
@@ -236,7 +661,8 @@ def collect_inputs():
 
         if value_mode != mode:
             print()
-            print("다른 형식 입력 무시:")
+            print("URL과 파일명은 한 번에 섞어서 입력할 수 없습니다.")
+            print("현재 입력은 건너뜁니다:")
             print(value)
             print()
 
@@ -244,7 +670,7 @@ def collect_inputs():
 
         if key in seen:
             print()
-            print("중복 입력 제외:")
+            print("이미 등록된 입력입니다:")
             print(key)
             print()
 
@@ -256,11 +682,11 @@ def collect_inputs():
         if value_mode == "analysis":
             break
 
-        if len(inputs) >= MAX_VODS:
+        if len(inputs) >= max_vods:
 
             print()
             print(
-                f"최대 등록 개수({MAX_VODS}개)에 "
+                f"최대 등록 개수({max_vods}개)에 "
                 f"도달했습니다."
             )
 
@@ -273,7 +699,7 @@ def find_analysis_files(file_stems):
 
     base_dir = get_base_dir()
 
-    chat_dir = base_dir / "chat"
+    chat_dir = base_dir / get_setting("OutputFolder")
 
     jobs = []
 
@@ -281,16 +707,23 @@ def find_analysis_files(file_stems):
     print("분석 대상 조회 중...")
     print()
 
+    if not chat_dir.exists():
+        print(f"{chat_dir} 폴더가 없습니다.")
+        print("먼저 VOD URL로 채팅을 수집하거나 설정의 OutputFolder를 확인해주세요.")
+        print()
+        return jobs
+
+    json_files = {}
+
+    for json_file in chat_dir.rglob("*.json"):
+        json_files.setdefault(
+            json_file.stem,
+            json_file
+        )
+
     for stem in file_stems:
 
-        found = None
-
-        for json_file in chat_dir.rglob("*.json"):
-
-            if json_file.stem == stem:
-
-                found = json_file
-                break
+        found = json_files.get(stem)
 
         if found:
 
@@ -298,7 +731,9 @@ def find_analysis_files(file_stems):
 
         else:
 
-            print(f"{stem} 조회 실패")
+            print(f"{stem} 파일을 찾을 수 없습니다.")
+            print("chat 폴더 안의 json 파일명 또는 같은 이름의 txt 파일명을 입력해주세요.")
+            print("분석에는 같은 이름의 json 파일이 필요합니다.")
             print()
 
     return jobs
@@ -337,6 +772,8 @@ def build_job_list(video_numbers):
 
 def show_job_preview(jobs):
 
+    preview_title_width = get_setting("PreviewTitleWidth")
+
     print()
     print("=" * 36)
     print("CHZZK VOD CHAT COLLECTOR")
@@ -359,12 +796,12 @@ def show_job_preview(jobs):
 
         title = shorten_text(
             title,
-            PREVIEW_TITLE_WIDTH
+            preview_title_width
         )
 
         print(
             f"{idx:02d}. {publish_date} | "
-            f"{title:<{PREVIEW_TITLE_WIDTH}} | "
+            f"{title:<{preview_title_width}} | "
             f"{job['video_no']}"
         )
 
@@ -483,7 +920,8 @@ def show_analysis_preview(json_path, duration_sec):
         print("키워드를 입력해주세요.")
         print()
         print(
-            "Enter 입력 시 기본 키워드 'ㅋ'로 분석을 진행합니다."
+            f"Enter 입력 시 기본 키워드 "
+            f"'{get_setting('DefaultKeyword')}'로 분석을 진행합니다."
         )
         print(
             "다른 키워드를 사용하려면 1~10자의 키워드를 입력해주세요."
@@ -493,7 +931,7 @@ def show_analysis_preview(json_path, duration_sec):
         keyword = prompt_input("> ").strip()
 
         if not keyword:
-            keyword = "ㅋ"
+            keyword = get_setting("DefaultKeyword")
 
         if len(keyword) > 10:
             keyword = keyword[:10]
@@ -606,9 +1044,9 @@ def collect_chats(
         ) * 100
 
         print(
-            f"\r진행률 {progress:6.2f}%"
-            f" | 채팅 {len(all_chats):,}개"
-            f" | 현재위치 "
+            f"\r{progress:6.2f}%"
+            f" | {len(all_chats):,}개"
+            f" | "
             f"{ms_to_hms(player_time)}",
             end="",
             flush=True
@@ -623,8 +1061,8 @@ def collect_chats(
         player_time = oldest_time - 1
 
     print(
-        "\r진행률 100.00%"
-        f" | 채팅 {len(all_chats):,}개"
+        "\r100.00%"
+        f" | {len(all_chats):,}개"
         " | 완료",
         end=""
     )
@@ -653,7 +1091,7 @@ def save_chat_files(
 
     output_dir = (
         base_dir
-        / "chat"
+        / get_setting("OutputFolder")
         / channel_name
     )
 
@@ -735,6 +1173,56 @@ def load_chat_json(json_path):
         return json.load(f)
 
 
+def validate_chat_json(chats):
+
+    if not isinstance(chats, list):
+        return "JSON 최상위 값이 채팅 목록(list)이 아닙니다."
+
+    if not chats:
+        return "채팅 데이터가 비어 있습니다."
+
+    for idx, chat in enumerate(
+        chats,
+        start=1
+    ):
+
+        if not isinstance(chat, dict):
+            return f"{idx}번째 채팅 데이터가 객체 형식이 아닙니다."
+
+        if "playerMessageTime" not in chat:
+            return f"{idx}번째 채팅에 playerMessageTime 값이 없습니다."
+
+        if "content" not in chat:
+            return f"{idx}번째 채팅에 content 값이 없습니다."
+
+        if not isinstance(chat["playerMessageTime"], int):
+            return f"{idx}번째 채팅의 playerMessageTime 값이 정수가 아닙니다."
+
+        if not isinstance(chat["content"], str):
+            return f"{idx}번째 채팅의 content 값이 문자열이 아닙니다."
+
+    return None
+
+
+def load_analysis_chats(json_path):
+
+    try:
+        chats = load_chat_json(json_path)
+
+    except json.JSONDecodeError:
+        return None, "JSON 형식이 올바르지 않습니다."
+
+    except (OSError, UnicodeError) as e:
+        return None, f"파일을 읽을 수 없습니다: {e}"
+
+    validation_error = validate_chat_json(chats)
+
+    if validation_error:
+        return None, validation_error
+
+    return chats, None
+
+
 def get_analysis_duration_sec(json_path):
 
     video_no = (
@@ -759,6 +1247,8 @@ def count_keyword_occurrences(content, keyword):
     if not keyword or not content:
         return 0
 
+    max_keyword_repeat = get_setting("MaxKeywordRepeat")
+
     count = 0
     start = 0
 
@@ -770,8 +1260,8 @@ def count_keyword_occurrences(content, keyword):
 
         count += 1
 
-        if count >= 5:
-            return 5
+        if max_keyword_repeat > 0 and count >= max_keyword_repeat:
+            return max_keyword_repeat
 
         start = idx + len(keyword)
 
@@ -874,6 +1364,8 @@ def analyze_chat(
 
 def calculate_average(results):
 
+    moving_average_minutes = get_setting("MovingAverageMinutes")
+
     total_chat = sum(
         row["chat"]
         for row in results
@@ -897,7 +1389,7 @@ def calculate_average(results):
         neighbors = []
 
         for i in range(
-            max(0, idx - MOVING_AVERAGE_MINUTES),
+            max(0, idx - moving_average_minutes),
             idx
         ):
 
@@ -950,10 +1442,16 @@ def calculate_average(results):
 
 def build_top_lists(results, overall_average):
 
+    top_count = get_setting("TopCount")
+    top_minimum_chat_count = get_setting("TopMinimumChatCount")
+
+    if top_minimum_chat_count <= 0:
+        top_minimum_chat_count = overall_average
+
     ranked_results = [
         row
         for row in results
-        if row["chat"] >= overall_average
+        if row["chat"] >= top_minimum_chat_count
     ]
 
     chat_top = sorted(
@@ -962,7 +1460,7 @@ def build_top_lists(results, overall_average):
             -row["chat"],
             row["minute"]
         )
-    )[:10]
+    )[:top_count]
 
     increase_top = sorted(
         ranked_results,
@@ -970,7 +1468,7 @@ def build_top_lists(results, overall_average):
             -round_number(row["increase"]),
             row["minute"]
         )
-    )[:10]
+    )[:top_count]
 
     keyword_count_top = sorted(
         ranked_results,
@@ -978,7 +1476,7 @@ def build_top_lists(results, overall_average):
             -row["keyword"],
             row["minute"]
         )
-    )[:10]
+    )[:top_count]
 
     keyword_rate_top = sorted(
         ranked_results,
@@ -987,7 +1485,7 @@ def build_top_lists(results, overall_average):
             -row["keyword"],
             row["minute"]
         )
-    )[:10]
+    )[:top_count]
 
     return (
         chat_top,
@@ -1047,10 +1545,10 @@ def format_top_row(row):
 
     return (
         f"채팅 {row['chat']:>4,} | "
-        f"키워드 {row['keyword']:>3,} "
-        f"({row['keyword_rate']:>5.1f}%) "
+        f"키워드 {row['keyword']:>3,} | "
+        f"비율 {row['keyword_rate']:>5.1f}% "
         f"{get_keyword_rate_marker(row['keyword_rate']):<3} | "
-        f"평균 {format_increase(row['increase']):>8}"
+        f"증가 {format_increase(row['increase']):>8}"
     )
 
 
@@ -1058,10 +1556,10 @@ def format_detail_row(row):
 
     return (
         f"채팅 {row['chat']:>4,} | "
-        f"키워드 {row['keyword']:>3,} "
-        f"({row['keyword_rate']:>5.1f}%) "
+        f"키워드 {row['keyword']:>3,} | "
+        f"비율 {row['keyword_rate']:>5.1f}% "
         f"{get_keyword_rate_marker(row['keyword_rate']):<3} | "
-        f"평균 {format_increase(row['increase']):>8}"
+        f"증가 {format_increase(row['increase']):>8}"
     )
 
 
@@ -1148,6 +1646,10 @@ def build_analysis_text(
     end_sec
 ):
 
+    moving_average_minutes = get_setting("MovingAverageMinutes")
+    top_count = get_setting("TopCount")
+    save_detail_log = get_setting("SaveDetailLog")
+
     total_chat = sum(
         row["chat"]
         for row in results
@@ -1179,7 +1681,7 @@ def build_analysis_text(
     lines.append(f"{round_number(overall_average):,}")
     lines.append("")
     lines.append("이동평균 기준")
-    lines.append(f"최근 {MOVING_AVERAGE_MINUTES}분")
+    lines.append(f"최근 {moving_average_minutes}분")
     lines.append("")
     lines.append("분석 키워드")
     lines.append(keyword)
@@ -1190,60 +1692,71 @@ def build_analysis_text(
     )
     lines.append("")
     lines.append("=" * 36)
-    lines.append("채팅량 TOP10")
+    lines.append(f"채팅량 TOP{top_count}")
     lines.append("=" * 36)
     lines.append("")
 
     append_top_section(lines, chat_top, start_sec)
 
     lines.append("=" * 36)
-    lines.append("이동평균 증가율 TOP10")
+    lines.append(f"이동평균 증가율 TOP{top_count}")
     lines.append("=" * 36)
     lines.append("")
 
     append_top_section(lines, increase_top, start_sec)
 
     lines.append("=" * 36)
-    lines.append("키워드 개수 TOP10")
+    lines.append(f"키워드 개수 TOP{top_count}")
     lines.append("=" * 36)
     lines.append("")
 
     append_top_section(lines, keyword_count_top, start_sec)
 
     lines.append("=" * 36)
-    lines.append("키워드 비율 TOP10")
+    lines.append(f"키워드 비율 TOP{top_count}")
     lines.append("=" * 36)
     lines.append("")
 
     append_top_section(lines, keyword_rate_top, start_sec)
 
-    lines.append("=" * 36)
-    lines.append("상세로그")
-    lines.append("=" * 36)
-    lines.append("")
+    if save_detail_log:
 
-    for row in results:
-
-        lines.append(
-            f"[{minute_to_hms_offset(row['minute'], start_sec)}]"
-        )
-        lines.append(
-            format_detail_row(row)
-        )
+        lines.append("=" * 36)
+        lines.append("상세로그")
+        lines.append("=" * 36)
         lines.append("")
+
+        for row in results:
+
+            lines.append(
+                f"[{minute_to_hms_offset(row['minute'], start_sec)}]"
+            )
+            lines.append(
+                format_detail_row(row)
+            )
+            lines.append("")
 
     return "\n".join(lines)
 
 
 def append_top_section(lines, rows, start_sec=0):
 
-    segments = merge_ranked_rows(rows)
+    segments = merge_ranked_rows(
+        rows,
+        get_setting("TopCount")
+    )
 
     for idx, segment in enumerate(segments, start=1):
 
         if len(segment["rows"]) > 1:
+            time_range = format_time_range(
+                segment["start_minute"],
+                segment["end_minute"],
+                start_sec
+            )
+
             lines.append(
-                f"{idx}. [{format_time_range(segment['start_minute'], segment['end_minute'], start_sec)}]"
+                f"{idx}. [{time_range}]"
             )
             lines.append("")
 
@@ -1389,16 +1902,15 @@ def process_job(
     print()
     print("=" * 36)
     print("수집 완료")
-    print()
     print(
         f"총 채팅 : "
         f"{len(all_chats):,}개"
     )
     print()
-    print("TXT :")
+    print("TXT:")
     print(txt_path)
     print()
-    print("JSON :")
+    print("JSON:")
     print(json_path)
     print("=" * 36)
     print()
@@ -1416,6 +1928,7 @@ def process_url_mode(video_numbers):
         print(
             "조회 가능한 VOD가 없습니다."
         )
+        print("URL이 올바른지 확인한 뒤 다시 입력해주세요.")
 
         return True
 
@@ -1456,6 +1969,7 @@ def process_url_mode(video_numbers):
             )
 
             print(e)
+            print("다음 VOD가 있으면 계속 진행합니다.")
             print()
 
     return True
@@ -1473,11 +1987,23 @@ def process_analysis_mode(file_stems):
         print(
             "분석 가능한 파일이 없습니다."
         )
+        print("chat 폴더 안의 json 파일명 또는 같은 이름의 txt 파일명을 입력해주세요.")
+        print("분석에는 같은 이름의 json 파일이 필요합니다.")
 
         return True
 
     json_path = jobs[0]
-    chats = load_chat_json(json_path)
+    chats, load_error = load_analysis_chats(
+        json_path
+    )
+
+    if load_error:
+        print()
+        print(f"{json_path.stem} 분석 파일을 읽을 수 없습니다.")
+        print(load_error)
+        print("채팅 수집으로 생성된 json 파일인지 확인해주세요.")
+        print()
+        return True
 
     duration_sec = get_analysis_duration_sec(
         json_path
@@ -1509,8 +2035,9 @@ def process_analysis_mode(file_stems):
         )
 
         print()
-        print(json_path.stem)
         print("분석 완료")
+        print(json_path.stem)
+        print("결과:")
         print(output_path)
 
     except Exception as e:
@@ -1518,6 +2045,7 @@ def process_analysis_mode(file_stems):
         print()
         print(f"{json_path.stem} 분석 실패")
         print(e)
+        print("파일 내용 또는 분석 시간을 확인한 뒤 다시 시도해주세요.")
         print()
 
     return True
@@ -1525,7 +2053,11 @@ def process_analysis_mode(file_stems):
 
 def main():
 
+    global SETTINGS
+
     try:
+
+        SETTINGS = initialize_settings()
 
         while True:
 
