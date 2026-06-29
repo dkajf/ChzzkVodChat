@@ -5,6 +5,15 @@ import sys
 from pathlib import Path
 from collections import defaultdict
 
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
+
+
+class EscapeInput(Exception):
+    pass
+
 MAX_VODS = 10
 MIN_CHAT_COUNT = 10
 MOVING_AVERAGE_MINUTES = 15
@@ -101,6 +110,41 @@ def format_approx_minutes(seconds):
     return f"약 {minutes}분"
 
 
+def prompt_input(prompt="> "):
+    if msvcrt is not None:
+        sys.stdout.write(prompt)
+        sys.stdout.flush()
+
+        buffer = []
+
+        while True:
+            key = msvcrt.getwch()
+
+            if key in ["\r", "\n"]:
+                sys.stdout.write("\n")
+                return "".join(buffer)
+
+            if key == "\x1b":
+                raise EscapeInput()
+
+            if key == "\x08":
+                if buffer:
+                    buffer.pop()
+                    sys.stdout.write("\b \b")
+                    sys.stdout.flush()
+                continue
+
+            if key in ["\x00", "\xe0"]:
+                msvcrt.getwch()
+                continue
+
+            buffer.append(key)
+            sys.stdout.write(key)
+            sys.stdout.flush()
+
+    return input(prompt)
+
+
 def get_chat_duration_sec(chats):
     if not chats:
         return 0
@@ -140,7 +184,7 @@ def collect_inputs():
 
     print("=" * 36)
     print("CHZZK VOD CHAT")
-    print("Version 1.2.2")
+    print("Version 1.2.3")
     print("=" * 36)
     print()
     print("VOD URL 또는 분석할 파일명 입력")
@@ -159,7 +203,7 @@ def collect_inputs():
 
         try:
 
-            value = input("> ").strip()
+            value = prompt_input("> ").strip()
 
         except EOFError:
 
@@ -333,7 +377,7 @@ def show_job_preview(jobs):
 
     while True:
 
-        answer = input("> ").strip().lower()
+        answer = prompt_input("> ").strip().lower()
 
         if answer in ["y", "yes"]:
             return True
@@ -366,7 +410,7 @@ def show_analysis_preview(json_path, duration_sec):
         print("분석 시작 시간 입력")
         print("예시 : 00:00:00")
         print("(미입력 시 00:00:00)")
-        start_value = input("> ").strip()
+        start_value = prompt_input("> ").strip()
 
         if not start_value:
             start_sec = 0
@@ -399,7 +443,7 @@ def show_analysis_preview(json_path, duration_sec):
             print(
                 f"(미입력 시 {format_time_seconds(duration_sec)})"
             )
-            end_value = input("> ").strip()
+            end_value = prompt_input("> ").strip()
 
             if not end_value:
                 end_sec = duration_sec
@@ -446,7 +490,7 @@ def show_analysis_preview(json_path, duration_sec):
         )
         print()
 
-        keyword = input("> ").strip()
+        keyword = prompt_input("> ").strip()
 
         if not keyword:
             keyword = "ㅋ"
@@ -477,7 +521,7 @@ def show_analysis_preview(json_path, duration_sec):
 
         while True:
 
-            answer = input("> ").strip().lower()
+            answer = prompt_input("> ").strip().lower()
 
             if answer in ["y", "yes"]:
                 return keyword, start_sec, end_sec
@@ -711,6 +755,29 @@ def get_analysis_duration_sec(json_path):
         return None
 
 
+def count_keyword_occurrences(content, keyword):
+    if not keyword or not content:
+        return 0
+
+    count = 0
+    start = 0
+
+    while True:
+        idx = content.find(keyword, start)
+
+        if idx < 0:
+            break
+
+        count += 1
+
+        if count >= 5:
+            return 5
+
+        start = idx + len(keyword)
+
+    return count
+
+
 def analyze_chat(
     chats,
     keyword,
@@ -748,11 +815,15 @@ def analyze_chat(
 
         minute_data[minute]["chat"] += 1
 
-        if keyword in chat["content"]:
+        keyword_count = count_keyword_occurrences(
+            chat["content"],
+            keyword
+        )
 
+        if keyword_count:
             minute_data[minute][
                 "keyword"
-            ] += 1
+            ] += keyword_count
 
     results = []
 
@@ -877,16 +948,16 @@ def calculate_average(results):
     return overall_average
 
 
-def build_top_lists(results):
+def build_top_lists(results, overall_average):
 
     ranked_results = [
         row
         for row in results
-        if row["chat"] >= MIN_CHAT_COUNT
+        if row["chat"] >= overall_average
     ]
 
     chat_top = sorted(
-        results,
+        ranked_results,
         key=lambda row: (
             -row["chat"],
             row["minute"]
@@ -994,6 +1065,80 @@ def format_detail_row(row):
     )
 
 
+def format_time_range(start_minute, end_minute, start_sec=0):
+    return (
+        f"{minute_to_hms_offset(start_minute, start_sec)} "
+        f"~ {minute_to_hms_offset(end_minute, start_sec)}"
+    )
+
+
+def merge_ranked_rows(rows, max_items=10):
+    segments = []
+    consumed_minutes = set()
+
+    for row in rows:
+
+        if row["minute"] in consumed_minutes:
+            continue
+
+        merged = False
+
+        for segment in segments:
+
+            if len(segment["rows"]) >= 3:
+                continue
+
+            if (
+                abs(row["minute"] - segment["start_minute"]) <= 1
+                or abs(row["minute"] - segment["end_minute"]) <= 1
+            ):
+                segment["rows"].append(row)
+                segment["start_minute"] = min(
+                    segment["start_minute"],
+                    row["minute"]
+                )
+                segment["end_minute"] = max(
+                    segment["end_minute"],
+                    row["minute"]
+                )
+                consumed_minutes.add(row["minute"])
+                merged = True
+                break
+
+        if merged:
+            continue
+
+        if len(segments) >= max_items:
+            break
+
+        segments.append({
+            "start_minute": row["minute"],
+            "end_minute": row["minute"],
+            "rows": [row]
+        })
+        consumed_minutes.add(row["minute"])
+
+    for row in rows:
+
+        if len(segments) >= max_items:
+            break
+
+        if row["minute"] in consumed_minutes:
+            continue
+
+        segments.append({
+            "start_minute": row["minute"],
+            "end_minute": row["minute"],
+            "rows": [row]
+        })
+        consumed_minutes.add(row["minute"])
+
+    return sorted(
+        segments,
+        key=lambda segment: segment["start_minute"]
+    )
+
+
 def build_analysis_text(
     file_stem,
     results,
@@ -1014,7 +1159,8 @@ def build_analysis_text(
         keyword_count_top,
         keyword_rate_top
     ) = build_top_lists(
-        results
+        results,
+        overall_average
     )
 
     lines = []
@@ -1034,9 +1180,6 @@ def build_analysis_text(
     lines.append("")
     lines.append("이동평균 기준")
     lines.append(f"최근 {MOVING_AVERAGE_MINUTES}분")
-    lines.append("")
-    lines.append("랭킹 최소 채팅")
-    lines.append(f"{MIN_CHAT_COUNT:,}")
     lines.append("")
     lines.append("분석 키워드")
     lines.append(keyword)
@@ -1094,7 +1237,28 @@ def build_analysis_text(
 
 def append_top_section(lines, rows, start_sec=0):
 
-    for idx, row in enumerate(rows, start=1):
+    segments = merge_ranked_rows(rows)
+
+    for idx, segment in enumerate(segments, start=1):
+
+        if len(segment["rows"]) > 1:
+            lines.append(
+                f"{idx}. [{format_time_range(segment['start_minute'], segment['end_minute'], start_sec)}]"
+            )
+            lines.append("")
+
+            for row in sorted(segment["rows"], key=lambda item: item["minute"]):
+                lines.append(
+                    f"   [{minute_to_hms_offset(row['minute'], start_sec)}]"
+                )
+                lines.append(
+                    format_detail_row(row)
+                )
+                lines.append("")
+
+            continue
+
+        row = segment["rows"][0]
 
         lines.append(
             f"{idx}. [{minute_to_hms_offset(row['minute'], start_sec)}]"
@@ -1361,37 +1525,43 @@ def process_analysis_mode(file_stems):
 
 def main():
 
-    while True:
+    try:
 
-        mode, inputs = collect_inputs()
+        while True:
 
-        if not inputs:
+            mode, inputs = collect_inputs()
+
+            if not inputs:
+
+                print()
+                print(
+                    "등록된 입력이 없습니다."
+                )
+
+                return
+
+            if mode == "url":
+
+                completed = process_url_mode(
+                    inputs
+                )
+
+            else:
+
+                completed = process_analysis_mode(
+                    inputs
+                )
+
+            if not completed:
+                return
 
             print()
-            print(
-                "등록된 입력이 없습니다."
-            )
+            print("메인 메뉴로 돌아갑니다.")
+            print()
 
-            return
-
-        if mode == "url":
-
-            completed = process_url_mode(
-                inputs
-            )
-
-        else:
-
-            completed = process_analysis_mode(
-                inputs
-            )
-
-        if not completed:
-            return
-
+    except EscapeInput:
         print()
-        print("메인 메뉴로 돌아갑니다.")
-        print()
+        print("프로그램을 종료합니다.")
 
 
 if __name__ == "__main__":
