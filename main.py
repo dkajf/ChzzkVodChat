@@ -2005,6 +2005,19 @@ def process_analysis_mode(file_stems):
         print()
         return True
 
+    if not jobs:
+
+        print()
+        print(
+            "분석 가능한 파일이 없습니다."
+        )
+        print("chat 폴더 안의 json/txt 파일명을 입력해주세요.")
+
+        return True
+
+    json_path = jobs[0]
+    chats = load_chat_json(json_path)
+
     duration_sec = get_analysis_duration_sec(
         json_path
     )
