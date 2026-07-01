@@ -607,15 +607,16 @@ def collect_inputs():
 
     print("=" * 36)
     print("CHZZK VOD CHAT")
-    print("Version 1.2.4")
+    print("Version 1.2.5")
     print("=" * 36)
     print()
     print("VOD URL 또는 분석 파일명을 입력하세요.")
     print("- URL: 채팅 수집")
-    print("- 파일명: 분석(json/txt 이름 가능)")
-    print("  실제 분석은 같은 이름의 json 파일을 사용합니다.")
+    print("- 파일명: 분석(txt 이름 가능)")
+    print("  실제 분석은 txt 파일을 사용합니다.")
     print("- 빈 Enter: 시작")
     print(f"최대 {max_vods}개 URL")
+    print("ESC를 누를 시 프로그램이 종료됩니다.")
     print()
 
     mode = None
@@ -649,8 +650,7 @@ def collect_inputs():
         else:
             print()
             print("입력 형식을 확인해주세요.")
-            print("VOD URL 또는 chat 폴더의 json/txt 파일명을 입력할 수 있습니다.")
-            print("txt 입력 시 같은 이름의 json 파일을 찾아 분석합니다.")
+            print("VOD URL 또는 chat 폴더의 txt 파일명을 입력할 수 있습니다.")
             print(value)
             print()
 
@@ -713,17 +713,17 @@ def find_analysis_files(file_stems):
         print()
         return jobs
 
-    json_files = {}
+    txt_files = {}
 
-    for json_file in chat_dir.rglob("*.json"):
-        json_files.setdefault(
-            json_file.stem,
-            json_file
+    for txt_file in chat_dir.rglob("*.txt"):
+        txt_files.setdefault(
+            txt_file.stem,
+            txt_file
         )
 
     for stem in file_stems:
 
-        found = json_files.get(stem)
+        found = txt_files.get(stem)
 
         if found:
 
@@ -732,8 +732,8 @@ def find_analysis_files(file_stems):
         else:
 
             print(f"{stem} 파일을 찾을 수 없습니다.")
-            print("chat 폴더 안의 json 파일명 또는 같은 이름의 txt 파일명을 입력해주세요.")
-            print("분석에는 같은 이름의 json 파일이 필요합니다.")
+            print("chat 폴더 안의 txt 파일명을 입력해주세요.")
+            print("분석에는 txt 파일이 필요합니다.")
             print()
 
     return jobs
@@ -1159,6 +1159,8 @@ def save_chat_files(
                 f'"{chat["content"]}"\n'
             )
 
+    json_path.unlink()
+
     return txt_path, json_path
 
 
@@ -1171,6 +1173,48 @@ def load_chat_json(json_path):
     ) as f:
 
         return json.load(f)
+
+
+def load_chat_txt(txt_path):
+
+    chats = []
+
+    with open(
+        txt_path,
+        "r",
+        encoding="utf-8-sig"
+    ) as f:
+
+        for line in f:
+
+            value = line.rstrip("\n")
+
+            match = re.match(
+                r"^\[(\d{2}:\d{2}:\d{2})\]\[[^\]]*\] (.*)$",
+                value
+            )
+
+            if not match:
+                continue
+
+            seconds = parse_hms(
+                match.group(1)
+            )
+
+            if seconds is None:
+                continue
+
+            content = match.group(2)
+
+            if len(content) >= 2 and content[0] == '"' and content[-1] == '"':
+                content = content[1:-1]
+
+            chats.append({
+                "playerMessageTime": seconds * 1000,
+                "content": content
+            })
+
+    return chats
 
 
 def validate_chat_json(chats):
@@ -1204,13 +1248,10 @@ def validate_chat_json(chats):
     return None
 
 
-def load_analysis_chats(json_path):
+def load_analysis_chats(txt_path):
 
     try:
-        chats = load_chat_json(json_path)
-
-    except json.JSONDecodeError:
-        return None, "JSON 형식이 올바르지 않습니다."
+        chats = load_chat_txt(txt_path)
 
     except (OSError, UnicodeError) as e:
         return None, f"파일을 읽을 수 없습니다: {e}"
@@ -1223,10 +1264,10 @@ def load_analysis_chats(json_path):
     return chats, None
 
 
-def get_analysis_duration_sec(json_path):
+def get_analysis_duration_sec(chat_path):
 
     video_no = (
-        json_path.stem
+        chat_path.stem
         .split("_")[-1]
     )
 
@@ -1454,13 +1495,15 @@ def build_top_lists(results, overall_average):
         if row["chat"] >= top_minimum_chat_count
     ]
 
+    candidate_count = top_count * 3
+
     chat_top = sorted(
         ranked_results,
         key=lambda row: (
             -row["chat"],
             row["minute"]
         )
-    )[:top_count]
+    )[:candidate_count]
 
     increase_top = sorted(
         ranked_results,
@@ -1468,7 +1511,7 @@ def build_top_lists(results, overall_average):
             -round_number(row["increase"]),
             row["minute"]
         )
-    )[:top_count]
+    )[:candidate_count]
 
     keyword_count_top = sorted(
         ranked_results,
@@ -1476,7 +1519,7 @@ def build_top_lists(results, overall_average):
             -row["keyword"],
             row["minute"]
         )
-    )[:top_count]
+    )[:candidate_count]
 
     keyword_rate_top = sorted(
         ranked_results,
@@ -1485,7 +1528,7 @@ def build_top_lists(results, overall_average):
             -row["keyword"],
             row["minute"]
         )
-    )[:top_count]
+    )[:candidate_count]
 
     return (
         chat_top,
@@ -1570,58 +1613,28 @@ def format_time_range(start_minute, end_minute, start_sec=0):
     )
 
 
-def merge_ranked_rows(rows, max_items=10):
+def build_merged_segments(rows):
+
     segments = []
-    consumed_minutes = set()
 
-    for row in rows:
+    for row in sorted(rows, key=lambda item: item["minute"]):
 
-        if row["minute"] in consumed_minutes:
+        if not segments:
+            segments.append({
+                "start_minute": row["minute"],
+                "end_minute": row["minute"],
+                "rows": [row]
+            })
             continue
 
-        merged = False
+        segment = segments[-1]
 
-        for segment in segments:
-
-            if len(segment["rows"]) >= 3:
-                continue
-
-            if (
-                abs(row["minute"] - segment["start_minute"]) <= 1
-                or abs(row["minute"] - segment["end_minute"]) <= 1
-            ):
-                segment["rows"].append(row)
-                segment["start_minute"] = min(
-                    segment["start_minute"],
-                    row["minute"]
-                )
-                segment["end_minute"] = max(
-                    segment["end_minute"],
-                    row["minute"]
-                )
-                consumed_minutes.add(row["minute"])
-                merged = True
-                break
-
-        if merged:
-            continue
-
-        if len(segments) >= max_items:
-            break
-
-        segments.append({
-            "start_minute": row["minute"],
-            "end_minute": row["minute"],
-            "rows": [row]
-        })
-        consumed_minutes.add(row["minute"])
-
-    for row in rows:
-
-        if len(segments) >= max_items:
-            break
-
-        if row["minute"] in consumed_minutes:
+        if row["minute"] <= segment["end_minute"] + 1:
+            segment["rows"].append(row)
+            segment["end_minute"] = max(
+                segment["end_minute"],
+                row["minute"]
+            )
             continue
 
         segments.append({
@@ -1629,7 +1642,36 @@ def merge_ranked_rows(rows, max_items=10):
             "end_minute": row["minute"],
             "rows": [row]
         })
-        consumed_minutes.add(row["minute"])
+
+    return segments
+
+
+def merge_ranked_rows(rows, max_items=10):
+    selected_rows = []
+    candidate_index = 0
+
+    while len(selected_rows) < max_items and candidate_index < len(rows):
+        selected_rows.append(
+            rows[candidate_index]
+        )
+        candidate_index += 1
+
+    segments = build_merged_segments(
+        selected_rows
+    )
+
+    while len(segments) < max_items and candidate_index < len(rows):
+        selected_rows.append(
+            rows[candidate_index]
+        )
+        candidate_index += 1
+
+        segments = build_merged_segments(
+            selected_rows
+        )
+
+    if len(segments) > max_items:
+        segments = segments[:max_items]
 
     return sorted(
         segments,
@@ -1783,13 +1825,13 @@ def append_top_section(lines, rows, start_sec=0):
 
 
 def save_analysis_file(
-    json_path,
+    chat_path,
     text
 ):
 
     output_path = (
-        json_path.parent
-        / f"{json_path.stem}_analysis.txt"
+        chat_path.parent
+        / f"{chat_path.stem}_analysis.txt"
     )
 
     with open(
@@ -1804,7 +1846,7 @@ def save_analysis_file(
 
 
 def process_analysis_job(
-    json_path,
+    chat_path,
     chats,
     keyword,
     start_sec,
@@ -1825,7 +1867,7 @@ def process_analysis_job(
     )
 
     text = build_analysis_text(
-        json_path.stem,
+        chat_path.stem,
         results,
         overall_average,
         keyword,
@@ -1834,7 +1876,7 @@ def process_analysis_job(
     )
 
     return save_analysis_file(
-        json_path,
+        chat_path,
         text
     )
 
@@ -1890,7 +1932,7 @@ def process_job(
         total_jobs
     )
 
-    txt_path, json_path = (
+    txt_path, _ = (
         save_chat_files(
             all_chats,
             channel_name,
@@ -1909,9 +1951,6 @@ def process_job(
     print()
     print("TXT:")
     print(txt_path)
-    print()
-    print("JSON:")
-    print(json_path)
     print("=" * 36)
     print()
 
@@ -1987,39 +2026,26 @@ def process_analysis_mode(file_stems):
         print(
             "분석 가능한 파일이 없습니다."
         )
-        print("chat 폴더 안의 json 파일명 또는 같은 이름의 txt 파일명을 입력해주세요.")
-        print("분석에는 같은 이름의 json 파일이 필요합니다.")
+        print("chat 폴더 안의 txt 파일명을 입력해주세요.")
+        print("분석에는 txt 파일이 필요합니다.")
 
         return True
 
-    json_path = jobs[0]
+    chat_path = jobs[0]
     chats, load_error = load_analysis_chats(
-        json_path
+        chat_path
     )
 
     if load_error:
         print()
-        print(f"{json_path.stem} 분석 파일을 읽을 수 없습니다.")
+        print(f"{chat_path.stem} 분석 파일을 읽을 수 없습니다.")
         print(load_error)
-        print("채팅 수집으로 생성된 json 파일인지 확인해주세요.")
+        print("채팅 수집으로 생성된 txt 파일인지 확인해주세요.")
         print()
         return True
-
-    if not jobs:
-
-        print()
-        print(
-            "분석 가능한 파일이 없습니다."
-        )
-        print("chat 폴더 안의 json/txt 파일명을 입력해주세요.")
-
-        return True
-
-    json_path = jobs[0]
-    chats = load_chat_json(json_path)
 
     duration_sec = get_analysis_duration_sec(
-        json_path
+        chat_path
     )
 
     if duration_sec is None:
@@ -2028,7 +2054,7 @@ def process_analysis_mode(file_stems):
         )
 
     preview = show_analysis_preview(
-        json_path,
+        chat_path,
         duration_sec
     )
 
@@ -2040,7 +2066,7 @@ def process_analysis_mode(file_stems):
     try:
 
         output_path = process_analysis_job(
-            json_path,
+            chat_path,
             chats,
             keyword,
             start_sec,
@@ -2049,14 +2075,14 @@ def process_analysis_mode(file_stems):
 
         print()
         print("분석 완료")
-        print(json_path.stem)
+        print(chat_path.stem)
         print("결과:")
         print(output_path)
 
     except Exception as e:
 
         print()
-        print(f"{json_path.stem} 분석 실패")
+        print(f"{chat_path.stem} 분석 실패")
         print(e)
         print("파일 내용 또는 분석 시간을 확인한 뒤 다시 시도해주세요.")
         print()
