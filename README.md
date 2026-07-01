@@ -90,7 +90,7 @@ chat/
 # 빌드
 
 ```bash
-python -m PyInstaller --onefile --icon chzzk_blue_icon.ico --name ChzzkVodChat_v1.2.1 main.py
+python -m PyInstaller --onefile --icon chzzk_blue_icon.ico --name ChzzkVodChat_v1.2.5 main.py
 ```
 
 ---
