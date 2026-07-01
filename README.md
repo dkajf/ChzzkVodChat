@@ -4,7 +4,7 @@ CHZZK VOD 채팅 수집 및 분석 프로그램입니다.
 
 ## 입력 규칙
 
-- URL 또는 파일명을 최대 30개 입력할 수 있습니다.
+- URL 최대 30개 혹은 파일명을 입력할 수 있습니다.
 - 첫 번째 유효한 입력으로 실행 모드가 결정됩니다.
 - URL이 먼저 입력되면 수집 모드
 - 파일명이 먼저 입력되면 분석 모드
@@ -101,6 +101,7 @@ python -m PyInstaller --onefile --icon chzzk_blue_icon.ico --name ChzzkVodChat_v
 - UI,UX 최적화
 - 코드 최적화
 - 설정 파일의 버전화
+- 다른 형식의 입력시 ffmpeg 영상 수정용 코드 출력
 
 ### v1.2.5
 
