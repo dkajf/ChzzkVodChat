@@ -1,5 +1,4 @@
-# CHZZK VOD Chat
-## Specification v1.2.2
+# ChzzkVodChat v1.2.2 Specification
 
 작성일 : 2026-06-28
 
