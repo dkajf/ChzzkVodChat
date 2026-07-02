@@ -607,15 +607,15 @@ def collect_inputs():
 
     print("=" * 36)
     print("CHZZK VOD CHAT")
-    print("Version 1.2.5")
+    print("Version 1.2.5.1")
     print("=" * 36)
     print()
     print("VOD URL 또는 분석 파일명을 입력하세요.")
     print("- URL: 채팅 수집")
+    print(f"최대 {max_vods}개 URL")
     print("- 파일명: 분석(txt 이름 가능)")
     print("  실제 분석은 txt 파일을 사용합니다.")
     print("- 빈 Enter: 시작")
-    print(f"최대 {max_vods}개 URL")
     print("ESC를 누를 시 프로그램이 종료됩니다.")
     print()
 
@@ -1643,41 +1643,41 @@ def build_merged_segments(rows):
             "rows": [row]
         })
 
-    return segments
+    segments.sort(
+        key=lambda segment: min(
+            row["_rank"]
+            for row in segment["rows"]
+        )
+    )
 
+    return segments
 
 def merge_ranked_rows(rows, max_items=10):
     selected_rows = []
     candidate_index = 0
 
     while len(selected_rows) < max_items and candidate_index < len(rows):
-        selected_rows.append(
-            rows[candidate_index]
-        )
+        selected_rows.append({
+            **rows[candidate_index],
+            "_rank": candidate_index
+        })
         candidate_index += 1
 
-    segments = build_merged_segments(
-        selected_rows
-    )
+    segments = build_merged_segments(selected_rows)
 
     while len(segments) < max_items and candidate_index < len(rows):
-        selected_rows.append(
-            rows[candidate_index]
-        )
+        selected_rows.append({
+            **rows[candidate_index],
+            "_rank": candidate_index
+        })
         candidate_index += 1
 
-        segments = build_merged_segments(
-            selected_rows
-        )
+        segments = build_merged_segments(selected_rows)
 
     if len(segments) > max_items:
         segments = segments[:max_items]
 
-    return sorted(
-        segments,
-        key=lambda segment: segment["start_minute"]
-    )
-
+    return segments
 
 def build_analysis_text(
     file_stem,
