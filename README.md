@@ -48,6 +48,8 @@ chat/
 
 프로그램 실행 후 분석할 단일 파일명을 입력합니다.
 
+혹은 분석할 txt 파일 드래그로 입력 가능합니다.
+
 채팅 수집시 txt 파일명 양식과 동일해야합니다.
 
 확장자는 입력하지 않아도 됩니다.
@@ -61,7 +63,7 @@ chat/
 
 분석할 시작 시간과 종료 시간을 입력합니다.
 
-* 시간 형식: `HH:MM:SS`
+* 시간 형식: `HH:MM:SS` or 'HHMMSS' or 'MMSS'
 * 시작 시간 미입력 시: `00:00:00`
 * 종료 시간 미입력 시: 영상 종료 시간
 
@@ -96,17 +98,17 @@ chat/
 ## 빌드
 
 ```
-python -m PyInstaller --onefile --icon chzzk_blue_icon.ico --name ChzzkVodChat_v1.2.5 main.py
+python -m PyInstaller --onefile --icon chzzk_blue_icon.ico --name ChzzkVodChat_v1.3 main.py
 ```
 
 
 ## 버전
 
-### v1.2.6(예정)
-- UI,UX 최적화
-- 코드 최적화
-- 설정 파일의 버전화
-- 다른 형식의 입력시 ffmpeg 영상 수정용 코드 출력
+### v1.3
+- 설정 파일의 버전 관리
+- json 파일 출력의 분리
+- txt 파일 드래그 입력 가능
+- 분석 기능의 시간 양식 다양화
 
 ### v1.2.5
 

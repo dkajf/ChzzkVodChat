@@ -14,13 +14,14 @@ except ImportError:
 class EscapeInput(Exception):
     pass
 
-CONFIG_FORMAT = "1"
-SETTINGS_FILE_NAME = "CHZZK_VOD_CHAT_Settings.txt"
+PROGRAM_VERSION = "1.3"
+MAX_VODS = 30
+SETTINGS_FILE_NAME = f"CVC_setting_v{PROGRAM_VERSION}.txt"
 
 DEFAULT_SETTINGS = {
-    "ConfigFormat": CONFIG_FORMAT,
-    "MaxVods": 30,
+    "Version": PROGRAM_VERSION,
     "OutputFolder": "chat",
+    "SaveJson": False,
     "DefaultKeyword": "ㅋ",
     "MaxKeywordRepeat": 5,
     "TopMinimumChatCount": 0,
@@ -33,15 +34,13 @@ DEFAULT_SETTINGS = {
 SETTINGS = DEFAULT_SETTINGS.copy()
 
 SETTING_RULES = {
-    "MaxVods": {
-        "type": "int",
-        "min": 1,
-        "max": 30
-    },
     "OutputFolder": {
         "type": "string",
         "min_length": 1,
         "max_length": 100
+    },
+    "SaveJson": {
+        "type": "bool"
     },
     "DefaultKeyword": {
         "type": "string",
@@ -118,10 +117,11 @@ def extract_video_no(url):
 
 
 def extract_file_stem(value):
+    value = normalize_input_value(value)
     name = Path(value).name
 
     match = re.match(
-        r"^(\d{4}-\d{2}-\d{2}_\d+)(?:\.(json|txt))?$",
+        r"^(\d{4}-\d{2}-\d{2}_\d+)(?:\.txt)?$",
         name
     )
 
@@ -131,7 +131,36 @@ def extract_file_stem(value):
     return match.group(1)
 
 
+def contains_txt_reference(value):
+    return re.search(
+        r"\d{4}-\d{2}-\d{2}_\d+\.txt\b",
+        value,
+        re.IGNORECASE
+    ) is not None
+
+
+def normalize_input_value(value):
+    value = value.strip()
+
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ["'", '"']:
+        value = value[1:-1]
+
+    return value.strip()
+
+
+def parse_bool_text(value):
+    return "True" if value else "False"
+
+
 def parse_hms(value):
+    value = value.strip()
+
+    if re.match(r"^\d{6}$", value):
+        value = f"{value[:2]}:{value[2:4]}:{value[4:6]}"
+
+    elif re.match(r"^\d{4}$", value):
+        value = f"00:{value[:2]}:{value[2:4]}"
+
     if not re.match(r"^\d{2}:\d{2}:\d{2}$", value):
         return None
 
@@ -249,29 +278,38 @@ def get_setting(name):
     return SETTINGS[name]
 
 
+def get_output_base_dir(create=False):
+
+    output_dir = (
+        get_base_dir()
+        / get_setting("OutputFolder")
+    )
+
+    if create:
+        output_dir.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+
+    return output_dir
+
+
 def build_settings_text(settings):
-
-    bool_value = "True"
-
-    if not settings["SaveDetailLog"]:
-        bool_value = "False"
-
     return "\n".join([
         "# ==========================================",
         "# CHZZK VOD CHAT Settings",
         "# ==========================================",
         "",
-        f"ConfigFormat={settings['ConfigFormat']}",
+        f"Version={settings['Version']}",
         "",
         "[Collect]",
         "",
-        "; 한 번에 등록할 수 있는 최대 VOD 개수입니다.",
-        "; 권장 범위 : 1 ~ 30",
-        f"MaxVods={settings['MaxVods']}",
-        "",
-        "; 채팅 파일(.json/.txt)이 저장될 폴더입니다.",
+        "; 수집 파일이 저장될 폴더입니다.",
         "; 프로그램 실행 폴더를 기준으로 생성됩니다.",
         f"OutputFolder={settings['OutputFolder']}",
+        "",
+        "; txt 파일만 필요하다면 0, json 파일이 추가로 필요할 경우 1로 변경하시면 됩니다.",
+        f"SaveJson={int(settings['SaveJson'])}",
         "",
         "",
         "[Analyze]",
@@ -295,16 +333,16 @@ def build_settings_text(settings):
         "",
         "[Display]",
         "",
-        "; 각 TOP 목록에 출력할 최대 개수입니다.",
+        "; 채팅 분석 기능의 각 TOP 목록에 출력할 최대 개수입니다.",
         f"TopCount={settings['TopCount']}",
         "",
-        "; 미리보기에서 표시할 방송 제목의 최대 글자 수입니다.",
+        "; 채팅 수집 확인에서 표시할 방송 제목의 최대 글자 수입니다.",
         "; 길어질 경우 자동으로 ... 처리합니다.",
         f"PreviewTitleWidth={settings['PreviewTitleWidth']}",
         "",
         "; 분석 결과 파일에 상세 로그를 포함할지 설정합니다.",
         "; False로 설정하면 TOP 결과만 저장합니다.",
-        f"SaveDetailLog={bool_value}",
+        f"SaveDetailLog={parse_bool_text(settings['SaveDetailLog'])}",
         ""
     ])
 
@@ -327,7 +365,7 @@ def print_settings_notice(message):
     print()
     print(message)
     print(f"설정 파일: {SETTINGS_FILE_NAME}")
-    print("필요하면 메모장으로 수정할 수 있습니다.")
+    print("몇몇 설정은 메모장으로 변경할 수 있습니다.")
     print()
 
 
@@ -384,9 +422,24 @@ def load_settings():
     return loaded
 
 
-def validate_config_format(raw_settings):
+def validate_settings_version(raw_settings):
 
-    return raw_settings.get("ConfigFormat") == CONFIG_FORMAT
+    return raw_settings.get("Version") == PROGRAM_VERSION
+
+
+def ask_overwrite_settings(message):
+    print_settings_notice(message)
+    print("기본 설정으로 덮어쓰시겠습니까? (Y/N)")
+
+    while True:
+
+        answer = prompt_input("> ").strip().lower()
+
+        if answer in ["y", "yes"]:
+            return True
+
+        if answer in ["n", "no"]:
+            return False
 
 
 def format_setting_error(key, value, reason, default_value):
@@ -439,17 +492,17 @@ def parse_bool_setting(key, value, errors):
 
     normalized = str(value).strip().lower()
 
-    if normalized == "true":
+    if normalized in ["true", "1"]:
         return True
 
-    if normalized == "false":
+    if normalized in ["false", "0"]:
         return False
 
     errors.append(
         format_setting_error(
             key,
             value,
-            "True 또는 False만 입력 가능합니다.",
+            "True, False, 1, 0만 입력 가능합니다.",
             default_value
         )
     )
@@ -536,22 +589,28 @@ def validate_setting_value(key, value, errors):
 def validate_settings(raw_settings):
 
     if "_LoadError" in raw_settings:
-        print_settings_notice(
-            "설정 파일을 읽을 수 없어 최신 형식으로 재생성했습니다."
+        should_save = ask_overwrite_settings(
+            "설정 파일을 읽을 수 없습니다."
         )
         print(raw_settings["_LoadError"])
 
         restored = DEFAULT_SETTINGS.copy()
-        save_settings(restored)
+
+        if should_save:
+            save_settings(restored)
+
         return restored
 
-    if not validate_config_format(raw_settings):
-        print_settings_notice(
-            "설정 파일 형식이 현재 버전과 달라 최신 형식으로 초기화했습니다."
+    if not validate_settings_version(raw_settings):
+        should_save = ask_overwrite_settings(
+            "설정 파일 형식이 현재 버전과 다릅니다."
         )
 
         restored = DEFAULT_SETTINGS.copy()
-        save_settings(restored)
+
+        if should_save:
+            save_settings(restored)
+
         return restored
 
     settings = DEFAULT_SETTINGS.copy()
@@ -587,7 +646,21 @@ def validate_settings(raw_settings):
             print(error)
             print()
 
-    save_settings(settings)
+        print("복원된 설정을 파일에 저장하시겠습니까? (Y/N)")
+
+        while True:
+
+            answer = prompt_input("> ").strip().lower()
+
+            if answer in ["y", "yes"]:
+                save_settings(settings)
+                break
+
+            if answer in ["n", "no"]:
+                break
+
+    else:
+        save_settings(settings)
 
     return settings
 
@@ -603,18 +676,16 @@ def initialize_settings():
 
 def collect_inputs():
 
-    max_vods = get_setting("MaxVods")
-
     print("=" * 36)
     print("CHZZK VOD CHAT")
-    print("Version 1.2.5.1")
+    print(f"Version {PROGRAM_VERSION}")
     print("=" * 36)
     print()
-    print("VOD URL 또는 분석 파일명을 입력하세요.")
+    print("VOD URL 또는 분석 파일을 입력하세요.")
     print("- URL: 채팅 수집")
-    print(f"최대 {max_vods}개 URL")
-    print("- 파일명: 분석(txt 이름 가능)")
-    print("- 빈 Enter: 시작")
+    print(f"- 최대 {MAX_VODS}개 URL")
+    print("- 파일명: 채팅 분석")
+    print("- 드래그로 파일을 끌어와도 됩니다.")
     print("ESC를 누를 시 프로그램이 종료됩니다.")
     print()
 
@@ -626,7 +697,9 @@ def collect_inputs():
 
         try:
 
-            value = prompt_input("> ").strip()
+            value = normalize_input_value(
+                prompt_input("> ")
+            )
 
         except EOFError:
 
@@ -638,13 +711,22 @@ def collect_inputs():
         video_no = extract_video_no(value)
         file_stem = extract_file_stem(value)
 
+        if video_no and contains_txt_reference(value):
+            print()
+            print("URL과 파일명은 한 번에 섞어서 입력할 수 없습니다.")
+            print("한 줄에는 VOD URL 또는 txt 파일명 하나만 입력해주세요.")
+            print(value)
+            print()
+
+            continue
+
         if video_no:
             value_mode = "url"
             key = video_no
 
         elif file_stem:
             value_mode = "analysis"
-            key = file_stem
+            key = value
 
         else:
             print()
@@ -681,11 +763,11 @@ def collect_inputs():
         if value_mode == "analysis":
             break
 
-        if len(inputs) >= max_vods:
+        if len(inputs) >= MAX_VODS:
 
             print()
             print(
-                f"최대 등록 개수({max_vods}개)에 "
+                f"최대 등록 개수({MAX_VODS}개)에 "
                 f"도달했습니다."
             )
 
@@ -696,21 +778,13 @@ def collect_inputs():
 
 def find_analysis_files(file_stems):
 
-    base_dir = get_base_dir()
-
-    chat_dir = base_dir / get_setting("OutputFolder")
+    chat_dir = get_output_base_dir(create=True)
 
     jobs = []
 
     print()
     print("분석 대상 조회 중...")
     print()
-
-    if not chat_dir.exists():
-        print(f"{chat_dir} 폴더가 없습니다.")
-        print("먼저 VOD URL로 채팅을 수집하거나 설정의 OutputFolder를 확인해주세요.")
-        print()
-        return jobs
 
     txt_files = {}
 
@@ -721,6 +795,15 @@ def find_analysis_files(file_stems):
         )
 
     for stem in file_stems:
+        input_path = Path(
+            normalize_input_value(stem)
+        )
+
+        if input_path.suffix.lower() == ".txt" and input_path.exists():
+            jobs.append(input_path)
+            continue
+
+        stem = extract_file_stem(stem) or stem
 
         found = txt_files.get(stem)
 
@@ -833,7 +916,7 @@ def shorten_text(text, width):
     return text[:width - 3] + "..."
 
 
-def show_analysis_preview(json_path, duration_sec):
+def show_analysis_preview(chat_path, duration_sec):
 
     print()
     print("=" * 36)
@@ -844,7 +927,7 @@ def show_analysis_preview(json_path, duration_sec):
     while True:
 
         print("분석 시작 시간 입력")
-        print("예시 : 00:00:00")
+        print("예시 : 00:00:00, 012345, 2222")
         print("(미입력 시 00:00:00)")
         start_value = prompt_input("> ").strip()
 
@@ -855,7 +938,7 @@ def show_analysis_preview(json_path, duration_sec):
 
             if start_sec is None:
                 print()
-                print("잘못된 시간 형식입니다. HH:MM:SS 형식으로 입력해주세요.")
+                print("잘못된 시간 형식입니다. HH:MM:SS 또는 숫자 4/6자리로 입력해주세요.")
                 print()
                 continue
 
@@ -875,7 +958,7 @@ def show_analysis_preview(json_path, duration_sec):
 
             print()
             print("분석 종료 시간 입력")
-            print("예시 : 00:00:00")
+            print("예시 : 00:00:00, 012345, 2222")
             print(
                 f"(미입력 시 {format_time_seconds(duration_sec)})"
             )
@@ -888,7 +971,7 @@ def show_analysis_preview(json_path, duration_sec):
 
                 if end_sec is None:
                     print()
-                    print("잘못된 시간 형식입니다. HH:MM:SS 형식으로 입력해주세요.")
+                    print("잘못된 시간 형식입니다. HH:MM:SS 또는 숫자 4/6자리로 입력해주세요.")
                     print()
                     continue
 
@@ -938,7 +1021,7 @@ def show_analysis_preview(json_path, duration_sec):
         print()
         print("=========================================")
         print("파일명")
-        print(json_path.stem)
+        print(chat_path.stem)
         print()
         print("분석 구간")
         print(
@@ -1082,15 +1165,12 @@ def save_chat_files(
     video_no
 ):
 
-    base_dir = get_base_dir()
-
     channel_name = sanitize_filename(
         channel_name
     )
 
     output_dir = (
-        base_dir
-        / get_setting("OutputFolder")
+        get_output_base_dir(create=True)
         / channel_name
     )
 
@@ -1103,28 +1183,10 @@ def save_chat_files(
         f"{publish_date}_{video_no}"
     )
 
-    json_path = (
-        output_dir
-        / f"{file_stem}.json"
-    )
-
     txt_path = (
         output_dir
         / f"{file_stem}.txt"
     )
-
-    with open(
-        json_path,
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        json.dump(
-            all_chats,
-            f,
-            ensure_ascii=False,
-            indent=2
-        )
 
     with open(
         txt_path,
@@ -1158,20 +1220,27 @@ def save_chat_files(
                 f'"{chat["content"]}"\n'
             )
 
-    json_path.unlink()
+    if get_setting("SaveJson"):
 
-    return txt_path, json_path
+        json_path = (
+            output_dir
+            / f"{file_stem}.json"
+        )
 
+        with open(
+            json_path,
+            "w",
+            encoding="utf-8"
+        ) as f:
 
-def load_chat_json(json_path):
+            json.dump(
+                all_chats,
+                f,
+                ensure_ascii=False,
+                indent=2
+            )
 
-    with open(
-        json_path,
-        "r",
-        encoding="utf-8"
-    ) as f:
-
-        return json.load(f)
+    return txt_path
 
 
 def load_chat_txt(txt_path):
@@ -1216,10 +1285,10 @@ def load_chat_txt(txt_path):
     return chats
 
 
-def validate_chat_json(chats):
+def validate_analysis_chats(chats):
 
     if not isinstance(chats, list):
-        return "JSON 최상위 값이 채팅 목록(list)이 아닙니다."
+        return "채팅 데이터가 목록(list)이 아닙니다."
 
     if not chats:
         return "채팅 데이터가 비어 있습니다."
@@ -1255,7 +1324,7 @@ def load_analysis_chats(txt_path):
     except (OSError, UnicodeError) as e:
         return None, f"파일을 읽을 수 없습니다: {e}"
 
-    validation_error = validate_chat_json(chats)
+    validation_error = validate_analysis_chats(chats)
 
     if validation_error:
         return None, validation_error
@@ -1828,6 +1897,11 @@ def save_analysis_file(
     text
 ):
 
+    chat_path.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
     output_path = (
         chat_path.parent
         / f"{chat_path.stem}_analysis.txt"
@@ -1931,7 +2005,7 @@ def process_job(
         total_jobs
     )
 
-    txt_path, _ = (
+    txt_path = (
         save_chat_files(
             all_chats,
             channel_name,
