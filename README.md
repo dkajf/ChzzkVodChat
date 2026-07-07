@@ -104,7 +104,17 @@ python -m PyInstaller --onefile --icon chzzk_blue_icon.ico --name ChzzkVodChat_v
 
 ## 버전
 
-### v1.3
+### v1.4.0 (예정)
+
+- gui
+- cli
+
+### v1.3.1 (예정)
+
+- 각 top별 개별 설정
+
+### v1.3.0
+
 - 설정 파일의 버전 관리
 - json 파일 출력의 분리
 - txt 파일 드래그 입력 가능
