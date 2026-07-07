@@ -27,6 +27,7 @@ DEFAULT_SETTINGS = {
     "TopMinimumChatCount": 0,
     "MovingAverageMinutes": 15,
     "TopCount": 10,
+    "TopMergeLimit": 3,
     "PreviewTitleWidth": 18,
     "SaveDetailLog": True
 }
@@ -66,6 +67,11 @@ SETTING_RULES = {
         "type": "int",
         "min": 1,
         "max": 100
+    },
+    "TopMergeLimit": {
+        "type": "int",
+        "min": 0,
+        "max": 10
     },
     "PreviewTitleWidth": {
         "type": "int",
@@ -329,6 +335,10 @@ def build_settings_text(settings):
         "; 이동 평균 계산에 사용할 이전 구간(분)입니다.",
         "; 값이 클수록 평균이 부드럽게 계산됩니다.",
         f"MovingAverageMinutes={settings['MovingAverageMinutes']}",
+        "",
+        "; 하나의 TOP 병합 구간에 포함할 최대 분 개수입니다.",
+        "; 0이면 제한 없이 병합하고, 1이면 병합하지 않습니다.",
+        f"TopMergeLimit={settings['TopMergeLimit']}",
         "",
         "",
         "[Display]",
@@ -1684,6 +1694,7 @@ def format_time_range(start_minute, end_minute, start_sec=0):
 def build_merged_segments(rows):
 
     segments = []
+    top_merge_limit = get_setting("TopMergeLimit")
 
     for row in sorted(rows, key=lambda item: item["minute"]):
 
@@ -1696,8 +1707,15 @@ def build_merged_segments(rows):
             continue
 
         segment = segments[-1]
+        can_merge = (
+            row["minute"] <= segment["end_minute"] + 1
+            and (
+                top_merge_limit == 0
+                or len(segment["rows"]) < top_merge_limit
+            )
+        )
 
-        if row["minute"] <= segment["end_minute"] + 1:
+        if can_merge:
             segment["rows"].append(row)
             segment["end_minute"] = max(
                 segment["end_minute"],

@@ -98,7 +98,7 @@ chat/
 ## 빌드
 
 ```
-python -m PyInstaller --onefile --icon chzzk_blue_icon.ico --name ChzzkVodChat_v1.3 main.py
+python -m PyInstaller --onefile --icon chzzk_blue_icon.ico --name ChzzkVodChat_v1.3.0 main.py
 ```
 
 
