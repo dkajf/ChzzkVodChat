@@ -614,7 +614,6 @@ def collect_inputs():
     print("- URL: 채팅 수집")
     print(f"최대 {max_vods}개 URL")
     print("- 파일명: 분석(txt 이름 가능)")
-    print("  실제 분석은 txt 파일을 사용합니다.")
     print("- 빈 Enter: 시작")
     print("ESC를 누를 시 프로그램이 종료됩니다.")
     print()
