@@ -1,5 +1,57 @@
 # CHZZK VOD CHAT
 
+## v2.0 GUI 실행
+
+Windows 실행 파일: `dist/ChzzkVodChat_v2.0.exe`를 더블클릭합니다.
+기존 `chzzk_blue_icon.ico`를 적용한 단일 EXE이며, 콘솔 창이나 별도 Python 설치 없이 실행합니다.
+EXE 실행 시 GUI 창 생성·응답 및 정상 종료를 확인했습니다.
+
+Python 3.10 이상과 Tkinter가 필요합니다. Windows Python 설치본에는 보통
+Tkinter가 포함되어 있습니다.
+
+```powershell
+python -m pip install -r requirements.txt
+python main.py
+```
+
+`python gui.py`로도 실행할 수 있습니다. 기존 CLI는 `python main.py --legacy-cli`입니다.
+Windows 실행 별칭 때문에 `python`이 실행되지 않으면 설치된 Python의 전체 경로를 사용하세요.
+
+- 수집·분석: URL을 Enter 또는 +로 추가합니다. 여러 URL 줄바꿈 붙여넣기를 지원하며 최대 10개입니다.
+- URL 입력 카드는 등록 후 해당 영상 카드로 전환되고, 마지막에 새 입력 카드가 생깁니다.
+- 각 영상의 범위와 키워드를 편집한 뒤 하단 출력 체크박스와 실행 버튼을 사용합니다.
+- 채팅 분석: 여러 TXT를 함께 추가하고 파일별 범위·키워드로 분석합니다. [-]로 개별 등록을 취소할 수 있습니다. 파일 내용을 갱신하려면 제거 후 다시 추가합니다.
+- 옵션: 적용하면 실행 설정과 다음 실행의 기본값을 함께 저장합니다. 취소는 미적용 편집을 되돌립니다.
+- 옵션별 설명과 입력 도움말을 제공합니다. 설명이 길면 옵션 목록을 마우스 휠로 스크롤할 수 있습니다.
+- 종료 시간은 빈칸이면 영상 끝까지 적용합니다. 길이가 없는 TXT는 채팅 데이터 끝까지 분석합니다.
+- URL 정보 조회 후 종료 칸에 영상 끝 시간을 자동으로 채웁니다. 직접 수정한 값은 재조회로 덮어쓰지 않습니다.
+- 영상별 방송 날짜와 게시 날짜를 구분합니다. 방송 시작은 API의 liveOpenDate, 종료는 시작+영상 길이의 계산값을 표시합니다.
+- 결과는 저장 폴더 아래 채널별로 저장하며 기존 이름이 있으면 새 이름을 생성합니다.
+- 실행 버튼 옆의 저장 폴더 열기로 결과를 확인합니다. 작업 중 창을 닫으면 취소·종료를 선택할 수 있습니다.
+- 수집 TXT와 분석 TXT는 `멀럭킹` 폴더의 v1.3 예시와 비슷한 텍스트 배치를 사용합니다. 채팅 시간은 초 단위로 내림해 HH:MM:SS로 기록하며, 프리미어 옵션은 :00만 덧붙입니다. 같은 초의 채팅 순서는 유지합니다.
+- 분석 TXT는 프로그램 제목 아래 방송 정보 → 분석 정보 → 적용 옵션 → TOP → 상세 로그 순으로 정리합니다.
+- 같은 시간·키워드의 URL 작업은 완료 기록과 선택한 결과 파일이 있으면 건너뜁니다. 시간·키워드 변경, 결과 파일 삭제, 아직 저장하지 않은 출력 종류 선택 시 다시 실행합니다. 완료 기록은 저장 폴더의 `.cvc_completed`에 보관합니다.
+
+설정은 `%APPDATA%/ChzzkVodChat/CVC_settings.json`, 기본 출력은
+`~/Documents/ChzzkVodChat`입니다. 저장 위치는 옵션에서 변경할 수 있습니다.
+Windows에서는 임시 파일의 원자적 이름 변경으로 미완성 결과와 덮어쓰기를 방지합니다.
+
+방송 시작 시각 필드는 예시 VOD의 실서비스 응답으로 확인했습니다. 개별 채팅의 실제 시각과 전체 수집 동작은 아직 실서비스에서 검증하지 않았습니다.
+채팅 시각 근거가 없으면 실제 시각 옵션을 켜도 `미확인`을 표시합니다.
+새 TXT는 v2 분석기에서 읽어야 합니다. 기존 v1.3 TXT의 분석은 계속 지원합니다.
+
+```powershell
+python -m unittest discover -s tests -v
+$env:CVC_GUI_TEST='1'
+python -m unittest discover -s tests -v
+python -m PyInstaller --clean --noconfirm --onefile --windowed --icon chzzk_blue_icon.ico --add-data "chzzk_blue_icon.ico;." --name ChzzkVodChat_v2.0 gui.py
+```
+
+검증 범위와 미확인 사항은 [v2 검증 기록](QA/v2_implementation.md)에 기록했습니다.
+아래 내용은 v1.3 CLI의 기존 사용 기록입니다.
+
+---
+
 CHZZK VOD 채팅 수집 및 분석 프로그램입니다.
 
 ## 입력 규칙
@@ -103,15 +155,6 @@ python -m PyInstaller --onefile --icon chzzk_blue_icon.ico --name ChzzkVodChat_v
 
 
 ## 버전
-
-### v1.4.0 (예정)
-
-- gui
-- cli
-
-### v1.3.1 (예정)
-
-- 각 top별 개별 설정
 
 ### v1.3.0
 

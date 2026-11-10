@@ -2227,4 +2227,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if "--legacy-cli" in sys.argv:
+        main()
+    else:
+        from cvc.gui import main as gui_main
+        gui_main()

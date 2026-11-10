@@ -1,13 +1,18 @@
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
+.ruff_cache/
 
 # Virtual Environment
 .venv/
 
 # Build
 build/
+dist/
 *.spec
 
 # Generated files
 chat/
+.cvc_completed/
+/멀럭킹/
