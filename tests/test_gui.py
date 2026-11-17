@@ -18,15 +18,27 @@ class GuiTests(unittest.TestCase):
         self.root.withdraw()
         self.paths = patch("cvc.gui.settings_path", return_value=Path(self.temp.name) / "CVC_settings.json")
         self.paths.start()
+        self.cache = patch("cvc.completion.legacy_settings_path", return_value=Path(self.temp.name) / "appdata" / "CVC_settings.json")
+        self.cache.start()
         self.lookup = patch.object(App, "lookup", lambda app, token: None)
         self.lookup.start()
+        self.persist = patch("cvc.settings.legacy_settings_path", return_value=Path(self.temp.name) / "appdata" / "CVC_settings.json")
+        self.persist.start()
+        self.exe_dir = patch("cvc.settings.executable_dir", return_value=Path(self.temp.name))
+        self.exe_dir.start()
         self.app = App(self.root)
+        from dataclasses import replace
+        self.app.settings = replace(self.app.settings, output_dir=self.temp.name)
+        self.app.reset_editor()
 
     def tearDown(self):
         self.app.shutdown.set()
         self.app.pool.shutdown(wait=True, cancel_futures=True)
         self.app.finish_close()
         self.paths.stop()
+        self.cache.stop()
+        self.persist.stop()
+        self.exe_dir.stop()
         self.lookup.stop()
         self.temp.cleanup()
 
@@ -114,6 +126,31 @@ class GuiTests(unittest.TestCase):
         self.assertTrue(release.is_set())
         self.assertTrue(finished.wait(1))
 
+    def test_progress_waits_for_save_and_distinguishes_failure(self):
+        from cvc.jobs import Job
+        from cvc.model import Selection
+        job = Job("progress", Metadata("123", duration_ms=1000), Selection(), self.app.settings)
+        with patch.object(self.app.pool, "submit"):
+            self.app.start([job])
+        self.app.events.put((job.token, "수집", (10, 0, 1000)))
+        self.app.poll()
+        self.assertEqual(float(self.app.bar["value"]), 80)
+        self.app.events.put((job.token, "분석 TXT 저장", None))
+        self.app.poll()
+        self.assertEqual(float(self.app.bar["value"]), 95)
+        self.app.events.put((job.token, "완료", []))
+        self.app.events.put(("", "종료", None))
+        self.app.poll()
+        self.assertEqual(float(self.app.bar["value"]), 100)
+        with patch.object(self.app.pool, "submit"):
+            self.app.start([job])
+        self.assertEqual(float(self.app.bar["value"]), 0)
+        self.app.events.put((job.token, "실패", "test"))
+        self.app.events.put(("", "종료", None))
+        self.app.poll()
+        self.assertLess(float(self.app.bar["value"]), 100)
+        self.assertIn("실패", self.app.progress_text.get())
+
     def test_collect_only_ignores_invalid_analysis_inputs(self):
         self.app.add_urls("https://chzzk.naver.com/video/123")
         token = next(iter(self.app.items))
@@ -157,6 +194,8 @@ class GuiTests(unittest.TestCase):
 
     def test_options_apply_persists_and_cancel_discards_edits(self):
         from cvc.settings import load_settings
+        self.assertNotIn("output_dir", self.app.option_vars)
+        self.assertFalse(hasattr(self.app, "choose_folder"))
         self.app.option_vars["top_count"].set("7")
         self.assertTrue(self.app.apply())
         self.assertEqual(load_settings(self.app.path)[0].top_count, 7)

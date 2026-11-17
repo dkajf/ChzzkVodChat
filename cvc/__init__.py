@@ -1,1 +1,1 @@
-"""ChzzkVodChat 2.0."""
+"""ChzzkVodChat 2.1.1."""

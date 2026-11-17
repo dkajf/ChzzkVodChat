@@ -29,7 +29,8 @@ class SampleTests(unittest.TestCase):
                 saved = save_lines(tmp, "roundtrip", chat_lines(chats, meta, settings))
                 loaded_meta, loaded = load_txt(saved)
                 self.assertEqual(loaded, chats)
-                self.assertEqual(loaded_meta, meta)
+                # The compact header intentionally omits the publish date.
+                self.assertEqual(loaded_meta, replace(meta, date="미확인"))
                 lines = list(metadata_lines(meta, settings)) + list(analysis_lines(result, Selection(), settings))
                 text = "\n".join(lines)
                 self.assertIn("CHZZK VOD CHAT ANALYZER", text)

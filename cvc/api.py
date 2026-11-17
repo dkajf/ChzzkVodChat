@@ -99,7 +99,7 @@ class Api:
                     raise ValueError("페이지 범위 밖 채팅")
                 text = raw.get("content", "")
                 identity = raw.get("messageId") or raw.get("videoChatId")
-                key = ("id", str(identity)) if identity is not None else ("row", ms, raw.get("userIdHash"), text, raw.get("messageTime"))
+                key = ("id", str(identity)) if identity is not None else ("row", ms, raw.get("userIdHash"), text, raw.get("messageTime"), raw.get("messageTypeCode"), json.dumps(raw.get("extras"), sort_keys=True, ensure_ascii=False))
                 occurrence[key] += 1
                 if ms == oldest:
                     boundary_keys.add(key)
@@ -107,7 +107,8 @@ class Api:
                     continue
                 if occurrence[key] <= seen[key]:
                     continue
-                if not isinstance(text, str) or not text:
+                donation, amount = donation_fields(raw)
+                if not isinstance(text, str) or (not text and not donation):
                     continue
                 profile = raw.get("profile")
                 try:
@@ -116,7 +117,7 @@ class Api:
                 except (ValueError, AttributeError):
                     nickname = "Unknown"
                 # messageTime semantics have not been verified against a live VOD.
-                chats.append(Chat(ms, text, nickname))
+                chats.append(Chat(ms, text, nickname, donation=donation, amount=amount))
             seen = Counter({key: occurrence[key] for key in boundary_keys})
             progress(len(chats), oldest, meta.duration_ms)
             if oldest == cursor:
@@ -131,3 +132,21 @@ class Api:
                 break
         chats.sort(key=lambda c: c.ms)
         return chats
+
+
+def donation_fields(raw):
+    extras = raw.get("extras") or {}
+    try:
+        extras = json.loads(extras) if isinstance(extras, str) else extras
+    except ValueError:
+        extras = {}
+    if not isinstance(extras, dict):
+        extras = {}
+    donation = str(raw.get("messageTypeCode")) == "10" or extras.get("donationType") in ("CHAT", "VIDEO")
+    amount = extras.get("payAmount")
+    # Only an explicitly supplied positive amount is public information.
+    if type(amount) is str and amount.isdecimal():
+        amount = int(amount)
+    if not donation or type(amount) is not int or amount <= 0:
+        amount = None
+    return donation, amount

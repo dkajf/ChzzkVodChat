@@ -15,6 +15,13 @@ from cvc.api import Api, Cancelled
 
 
 class CoreTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        cache = patch("cvc.completion.legacy_settings_path", return_value=Path(temp.name) / "CVC_settings.json")
+        cache.start()
+        self.addCleanup(cache.stop)
+
     def test_input(self):
         self.assertEqual(parse_time("2222"), 1342000)
         self.assertEqual(parse_time("012345"), 5025000)

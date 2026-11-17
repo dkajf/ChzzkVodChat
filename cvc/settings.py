@@ -1,15 +1,24 @@
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, field
 import json
 import os
 from pathlib import Path
 import tempfile
 import uuid
+import sys
+
+
+def executable_dir():
+    return Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
+
+
+def legacy_settings_path():
+    return Path(os.environ.get("APPDATA", str(Path.home() / ".config"))) / "ChzzkVodChat" / "CVC_settings.json"
 
 
 @dataclass(frozen=True)
 class Settings:
     schema_version: int = 2
-    output_dir: str = str(Path.home() / "Documents" / "ChzzkVodChat")
+    output_dir: str = field(default_factory=lambda: str(executable_dir()))
     save_chat: bool = True
     save_analysis: bool = True
     actual_time: bool = False
@@ -41,7 +50,14 @@ class Settings:
 
 
 def settings_path():
-    return Path(os.environ.get("APPDATA", str(Path.home() / ".config"))) / "ChzzkVodChat" / "CVC_settings.json"
+    return executable_dir() / "CVC_settings.json"
+
+
+def persist_settings(settings):
+    from dataclasses import replace
+    target = settings_path()
+    save_settings(target, replace(settings, output_dir=str(executable_dir())))
+    return target
 
 
 def save_settings(path, settings):
@@ -51,7 +67,9 @@ def save_settings(path, settings):
     fd, name = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(asdict(settings), f, ensure_ascii=False, indent=2)
+            data = asdict(settings)
+            data.pop("output_dir", None)
+            json.dump(data, f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
         os.replace(name, path)
@@ -106,7 +124,7 @@ def load_settings(path, legacy_dir=None):
     values = defaults.copy()
     for field in fields(Settings):
         key = field.name
-        if key == "schema_version" or key not in raw:
+        if key in ("schema_version", "output_dir") or key not in raw:
             continue
         value = raw[key]
         if type(value) is not type(defaults[key]):
@@ -122,6 +140,7 @@ def load_settings(path, legacy_dir=None):
             values[key] = value
         except ValueError as e:
             notices.append(f"{key}: {e}, 기본값 복원")
+    values["output_dir"] = str(executable_dir())
     result = Settings(**values)
     try:
         result.validate()

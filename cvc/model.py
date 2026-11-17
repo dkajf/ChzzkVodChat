@@ -28,6 +28,8 @@ class Chat:
     text: str
     nickname: str = "Unknown"
     actual: str | None = None
+    donation: bool = False
+    amount: int | None = None
 
 
 @dataclass(frozen=True)

@@ -11,8 +11,12 @@ __pycache__/
 build/
 dist/
 *.spec
+!ChzzkVodChat_v2.1.1.spec
 
 # Generated files
 chat/
 .cvc_completed/
 /멀럭킹/
+CVC_settings.json
+settings_location.json
+CVC_settings.json.*.bak

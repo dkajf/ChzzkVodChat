@@ -8,6 +8,7 @@ import tempfile
 import re
 from .model import hms
 from .storage import safe_name
+from .settings import legacy_settings_path
 
 
 def receipt_path(job):
@@ -19,7 +20,8 @@ def completed(job):
     if job.source is not None:
         return False
     try:
-        data = json.loads(receipt_path(job).read_text(encoding="utf-8"))
+        current = receipt_path(job)
+        data = json.loads(current.read_text(encoding="utf-8"))
         if data.get("selection") != asdict(job.selection):
             return False
         for wanted, kind in ((job.settings.save_chat, "chat"), (job.settings.save_analysis, "analysis")):
@@ -75,7 +77,7 @@ def infer_existing_completion(job):
             # Collection-only jobs have no active range/keyword and always collect
             # the full VOD. Confirm a known collection marker before migration.
             with chats[0].open(encoding="utf-8-sig") as stream:
-                if not any(stream.readline(10000).strip() in ("[채팅 데이터]", "[채팅 데이터 CVC2]") for _ in range(32)):
+                if not any(stream.readline(10000).strip() in ("[채팅 데이터]", "[채팅 데이터 CVC2]", "[채팅 내역]") for _ in range(32)):
                     return False
         try:
             record_completion(job, paths)

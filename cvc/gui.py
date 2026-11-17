@@ -9,7 +9,7 @@ from tkinter import ttk, filedialog, messagebox
 import uuid
 from .api import Api
 from .model import hms, video_id, selection, Metadata
-from .settings import Settings, load_settings, save_settings, settings_path
+from .settings import Settings, load_settings, save_settings, settings_path, persist_settings
 from .storage import load_txt
 from .jobs import Job, run_jobs
 from .completion import completed
@@ -148,7 +148,7 @@ class App:
         self.txt_items = {}
         self.path = settings_path()
         self.settings, notices = load_settings(self.path, Path(__file__).resolve().parent.parent)
-        root.title("ChzzkVodChat v2.0")
+        root.title("ChzzkVodChat v2.1.1")
         root.geometry("980x820")
         root.minsize(780, 640)
         icon = Path(__file__).resolve().parent.parent / "chzzk_blue_icon.ico"
@@ -169,7 +169,9 @@ class App:
         progress.pack(fill="x")
         self.status = tk.StringVar(value="대기")
         ttk.Label(progress, textvariable=self.status, wraplength=900).pack(anchor="w")
-        self.bar = ttk.Progressbar(progress, mode="indeterminate")
+        self.progress_text = tk.StringVar(value="0%")
+        ttk.Label(progress, textvariable=self.progress_text).pack(anchor="w")
+        self.bar = ttk.Progressbar(progress, mode="determinate", maximum=100)
         self.bar.pack(fill="x", pady=4)
         self.log = tk.Text(progress, height=6, state="disabled", wrap="word")
         self.log.pack(fill="x")
@@ -363,7 +365,6 @@ class App:
         parent = area.body
         self.option_help = {}
         explanations = {
-            "output_dir": "수집·분석 TXT를 저장할 폴더입니다. 이 폴더 안에 채널별 하위 폴더를 만들며, 기존 파일은 새 이름으로 보존합니다.",
             "default_keyword": "새 URL 또는 TXT를 등록할 때 채울 키워드입니다 (1~10자). 이미 등록한 항목의 키워드는 바뀌지 않습니다.",
             "interval": "VOD 시작 00:00:00을 기준으로 1~10분씩 집계합니다. 예: 5분은 00~05, 05~10분. 부분 구간도 한 구간으로 계산합니다.",
             "top_count": "채팅량·증가율·키워드 개수·키워드 포함 채팅 비율의 TOP 목록마다 표시할 최대 순위 수입니다. 대상이 부족하면 있는 결과만 표시합니다.",
@@ -376,7 +377,7 @@ class App:
             "actual_time": "수집 TXT에 채팅의 실제 날짜·시각을 함께 표시합니다. 원본에 실제 시각 근거가 없으면 미확인으로 표시합니다.",
         }
         self.option_vars = {}
-        labels = dict(output_dir="저장 위치", default_keyword="새 영상 기본 키워드 (1~10자)", interval="분석 단위 (1~10분)",
+        labels = dict(default_keyword="새 영상 기본 키워드 (1~10자)", interval="분석 단위 (1~10분)",
                       top_count="TOP 개수", moving_minutes="이동평균 이전 N분 (분석 단위의 배수)", minimum="최소 채팅 수 (0=구간 평균)",
                       repeat="키워드 반복 제한 (0=무제한)", merge_limit="최대 병합 구간 수 (0=무제한)",
                       detail="상세 로그 저장", premiere="프리미어 입력용 시간 표시 (:00 추가)", actual_time="수집 TXT 실제 시각 표시")
@@ -393,12 +394,9 @@ class App:
             else:
                 control = ttk.Entry(parent, textvariable=var, width=45)
             control.grid(row=row, column=1, sticky="ew", padx=12)
-            if key == "output_dir":
-                ttk.Button(parent, text="찾아보기", command=self.choose_folder).grid(row=row, column=2)
             explanation = ttk.Label(parent, text=explanations[key], foreground="#555555", wraplength=820)
             explanation.grid(row=row + 1, column=0, columnspan=3, sticky="w", padx=(0, 8), pady=(0, 10))
             self.option_help[key] = explanation
-            Tip(control, explanations[key])
         parent.bind("<Configure>", lambda e: [label.configure(wraplength=max(240, e.width - 24)) for label in self.option_help.values()])
         parent.columnconfigure(1, weight=1)
         self.option_error = ttk.Label(outer, foreground="#b3261e", wraplength=750)
@@ -407,12 +405,6 @@ class App:
         buttons.pack(fill="x")
         for label, command in (("적용", self.apply), ("취소", self.reset_editor), ("기본값 복원", self.restore)):
             ttk.Button(buttons, text=label, command=command).pack(side="left", padx=(0, 8))
-        ttk.Label(outer, text=str(self.path), wraplength=750).pack(anchor="w", pady=8)
-
-    def choose_folder(self):
-        path = filedialog.askdirectory()
-        if path:
-            self.option_vars["output_dir"].set(path)
 
     def apply(self):
         try:
@@ -423,8 +415,8 @@ class App:
             settings = replace(self.settings, **values)
             settings.validate()
             settings = replace(settings, save_chat=self.save_chat.get(), save_analysis=self.save_analysis.get())
-            save_settings(self.path, settings)
-            self.settings = settings
+            self.path = persist_settings(settings)
+            self.settings = replace(settings, output_dir=str(self.path.parent))
             self.option_error.configure(text=f"적용·저장 완료 · 병합 최대 {settings.merge_limit * settings.interval}분 (0=무제한)")
             return True
         except (ValueError, tk.TclError, OSError) as e:
@@ -440,8 +432,8 @@ class App:
         if messagebox.askyesno("기본값 복원", "공통 설정을 기본값으로 복원하고 적용할까요?"):
             try:
                 defaults = Settings()
-                save_settings(self.path, defaults)
-                self.settings = defaults
+                self.path = persist_settings(defaults)
+                self.settings = replace(defaults, output_dir=str(self.path.parent))
                 self.save_chat.set(True)
                 self.save_analysis.set(True)
                 self.reset_editor()
@@ -538,8 +530,10 @@ class App:
     def start(self, jobs):
         self.busy = True
         self.cancel.clear()
-        self.bar.configure(mode="indeterminate")
-        self.bar.start(12)
+        self.bar.configure(mode="determinate", value=0)
+        self.progress_text.set("0%")
+        self.job_progress = {job.token: 0 for job in jobs}
+        self.job_success = set()
         for job in jobs:
             end = hms(job.selection.end_ms) if job.selection.end_ms is not None else "자동 끝"
             if job.source or job.settings.save_analysis:
@@ -593,7 +587,11 @@ class App:
                 elif kind == "종료":
                     self.busy = False
                     self.bar.stop()
-                    self.bar.configure(value=0)
+                    if len(self.job_success) == len(self.job_progress):
+                        self.bar.configure(value=100)
+                        self.progress_text.set("100% · 완료")
+                    else:
+                        self.progress_text.set(f"{int(float(self.bar['value']))}% · 실패 또는 취소 포함")
                     self.refresh()
                     if self.closing:
                         self.finish_close()
@@ -604,6 +602,17 @@ class App:
                 elif kind == "결과":
                     self.log_line(f"분석 범위 {hms(payload.start)} ~ {hms(payload.end)}, 채팅 {sum(r.chat for r in payload.buckets):,}개")
                 else:
+                    fractions = {"TXT 읽기": 0, "수집 TXT 저장": 80, "분석": 85, "분석 TXT 저장": 95, "완료": 100, "건너뜀": 100}
+                    if kind in ("완료", "건너뜀"):
+                        self.job_success.add(token)
+                    fraction = fractions.get(kind, 0)
+                    if kind == "수집" and payload:
+                        _, cursor, duration = payload
+                        fraction = 80 * max(0, min(1, (duration - cursor) / duration)) if duration else 0
+                    self.job_progress[token] = max(self.job_progress.get(token, 0), fraction)
+                    total = sum(self.job_progress.values()) / max(1, len(self.job_progress))
+                    self.bar.configure(value=total)
+                    self.progress_text.set(f"{int(total)}% · 완료 {len(self.job_success)}/{len(self.job_progress)}개")
                     name = self.items[token]["vod"] if token in self.items else (self.txt_items[token]["path"].name if token in self.txt_items else token)
                     text = f"{name}: {kind}"
                     if kind == "수집" and payload:

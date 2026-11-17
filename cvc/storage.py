@@ -15,9 +15,9 @@ def safe_name(value):
 
 
 def broadcast_fields(meta):
-    return (("채널", meta.channel), ("제목", meta.title), ("VOD ID", meta.vod_id or "미확인"),
-            ("VOD URL", meta.url), ("방송 날짜", meta.broadcast_date), ("VOD 게시 날짜", meta.date),
-            ("방송 시작", meta.start or "미확인"), ("방송 종료", meta.end or "미확인"),
+    return (("채널", meta.channel), ("제목", meta.title), ("VOD URL", meta.url),
+            ("방송 시작", meta.start[:19] if meta.start else "미확인"),
+            ("방송 종료", meta.end[:19] if meta.end else "미확인"),
             ("전체 방송 길이", hms(meta.duration_ms) if meta.duration_ms is not None else "미확인"))
 
 
@@ -25,19 +25,19 @@ def metadata_lines(meta, settings):
     yield "[방송 정보]"
     for key, value in broadcast_fields(meta):
         yield f"{key}: {str(value).replace(chr(10), ' ').replace(chr(13), ' ')}"
-    yield "시간 표시: " + ("HH:MM:SS:00" if settings.premiere else "HH:MM:SS")
     yield ""
 
 
 def chat_lines(chats, meta, settings):
     yield from metadata_lines(meta, settings)
-    yield "[채팅 데이터]"
+    yield "[채팅 내역]"
     for chat in chats:
         actual = chat.actual or "미확인"
-        clock = f"[실제 시각: {actual}]" if settings.actual_time else ""
+        clock = f" [실제 시각: {actual}]" if settings.actual_time else ""
         timestamp = hms(chat.ms, settings.premiere)
         nickname = json.dumps(chat.nickname, ensure_ascii=False)[1:-1].replace("]", r"\u005d")
-        yield f"[{timestamp}]{clock}[{nickname}] " + json.dumps(chat.text, ensure_ascii=False)
+        donation = (f" [후원 {chat.amount:,}원]" if chat.amount is not None else " [후원]") if chat.donation else ""
+        yield f"[{timestamp}]{clock} [{nickname}]{donation} " + json.dumps(chat.text, ensure_ascii=False)
 
 
 def load_txt(path, check=lambda: None):
@@ -74,16 +74,21 @@ def load_txt(path, check=lambda: None):
                 modern = True
                 header = False
                 continue
-            if value == "[채팅 데이터]":
+            if value in ("[채팅 데이터]", "[채팅 내역]"):
                 readable = True
                 header = False
                 continue
             if header and ": " in value:
                 key, text = value.split(": ", 1)
+                key = key.strip()
                 mapping = {"채널": "channel", "제목": "title", "VOD ID": "vod_id", "방송 날짜": "date", "VOD 게시 날짜": "date", "방송 시작": "start", "방송 종료": "end"}
                 if key in mapping:
                     data = text if text != "미확인" else (None if key in ("방송 시작", "방송 종료") else ("" if key == "VOD ID" else text))
                     meta = replace(meta, **{mapping[key]: data})
+                elif key == "VOD URL":
+                    match = re.fullmatch(r'https://chzzk\.naver\.com/video/(\d+)', text)
+                    if match:
+                        meta = replace(meta, vod_id=match[1])
                 elif key == "전체 방송 길이" and text != "미확인":
                     meta = replace(meta, duration_ms=parse_time(text))
                 continue
@@ -101,7 +106,7 @@ def load_txt(path, check=lambda: None):
                     raise ValueError(f"{number}행: 잘못된 채팅 데이터")
                 chats.append(chat)
             elif readable:
-                match = re.fullmatch(r'\[(\d{2,}:\d{2}:\d{2})(?:\.(\d{3}))?(?::00)?\](?:\[실제 시각: ([^\]]*)\])?\[([^\]]*)\] (".*")', value)
+                match = re.fullmatch(r'\[(\d{2,}:\d{2}:\d{2})(?:\.(\d{3}))?(?::00)?\]\s*(?:\[실제 시각: ([^\]]*)\]\s*)?\[([^\]]*)\](?:\s*\[후원(?: ([\d,]+)원)?\])? (".*")', value)
                 if not match:
                     if value:
                         raise ValueError(f"{number}행: 손상된 채팅 행")
@@ -109,7 +114,9 @@ def load_txt(path, check=lambda: None):
                 ms = parse_time(match[1]) + int(match[2] or 0)
                 nickname = json.loads('"' + match[4] + '"')
                 actual = match[3] if match[3] != "미확인" else None
-                chats.append(Chat(ms, json.loads(match[5]), nickname, actual))
+                donation = bool(re.search(r'\[후원(?: [\d,]+원)?\] $', value[:match.start(6)]))
+                amount = int(match[5].replace(",", "")) if match[5] else None
+                chats.append(Chat(ms, json.loads(match[6]), nickname, actual, donation, amount))
             else:
                 match = re.match(r'^\[(\d{2,}:\d{2}:\d{2}(?::00)?)\]\[(.*?)\] "(.*)$', value)
                 if match:
@@ -124,10 +131,10 @@ def load_txt(path, check=lambda: None):
         raise ValueError("TXT 끝에 닫히지 않은 채팅 문자열이 있습니다")
     if not modern and not readable and not chats:
         raise ValueError("분석 가능한 채팅 TXT가 아닙니다")
-    if not meta.vod_id:
+    if not meta.vod_id or meta.date == "미확인":
         match = re.fullmatch(r"(\d{4}-\d{2}-\d{2})_(\d+)(?: \(\d+\))?", Path(path).stem)
         if match:
-            meta = replace(meta, vod_id=match[2], date=match[1], channel=Path(path).parent.name)
+            meta = replace(meta, vod_id=meta.vod_id or match[2], date=match[1], channel=meta.channel if meta.channel != "미확인" else Path(path).parent.name)
     return meta, chats
 
 
